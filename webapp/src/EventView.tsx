@@ -1155,7 +1155,7 @@ export function EventView() {
                           copyRawJson();
                         }}
                       >
-                        Copy
+                        Копировать
                       </a>
                       |
                     </Show>
@@ -1166,7 +1166,7 @@ export function EventView() {
                         selectRawJson();
                       }}
                     >
-                      Select
+                      Выделить
                     </a>
                     ]
                   </div>
@@ -1178,7 +1178,7 @@ export function EventView() {
                         autohide
                         delay={10000}
                       >
-                        <Toast.Body>JSON copied to clipboard</Toast.Body>
+                        <Toast.Body>JSON скопирован в буфер</Toast.Body>
                       </Toast>
                     </div>
                   </div>
@@ -1611,7 +1611,7 @@ function History(props: {
       <div class="row mb-2">
         <div class="col">
           <div class="card">
-            <div class="card-header">History</div>
+            <div class="card-header">История</div>
             <div class="card-body p-0">
               <ul class="list-group">
                 <For each={props.history}>
@@ -1622,16 +1622,16 @@ function History(props: {
                         {" - "}
                         <Switch fallback={entry.action}>
                           <Match when={entry.action == "escalated"}>
-                            Escalated
+                            Эскалировано
                           </Match>
                           <Match when={entry.action == "de-escalated"}>
-                            De-escalated
+                            Отменена эскалация
                           </Match>
                           <Match when={entry.action == "comment"}>
-                            Comment
+                            Комментарий
                           </Match>
                         </Switch>{" "}
-                        by <i>{entry.username || "null"}</i>
+                        от <i>{entry.username || "null"}</i>
                         <Show when={entry.action == "comment"}>
                           <p class="m-0">{entry.comment}</p>
                         </Show>
@@ -1648,7 +1648,7 @@ function History(props: {
                     class="btn btn-primary"
                     onClick={() => props.setShowCommentForm(true)}
                   >
-                    Add Comment
+                    Добавить комментарий
                   </button>
                 </div>
               </div>
@@ -1686,12 +1686,12 @@ function CommentEntry(props: {
         <div class="col">
           <form onSubmit={submitEvent}>
             <div class="card">
-              <div class="card-header">Comment</div>
+              <div class="card-header">Комментарий</div>
               <div class="card-body p-0">
                 <textarea
                   id={inputId}
                   class="form-control"
-                  placeholder="Enter a comment..."
+                  placeholder="Введите комментарий..."
                 />
               </div>
               <div class="card-footer text-end">
@@ -1700,10 +1700,10 @@ function CommentEntry(props: {
                   class="btn btn-secondary me-2"
                   onClick={props.close}
                 >
-                  Close
+                  Закрыть
                 </button>
                 <button type="submit" class="btn btn-primary">
-                  Submit
+                  Сохранить
                 </button>
               </div>
             </div>

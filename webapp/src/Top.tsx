@@ -21,15 +21,15 @@ export const closeHelp = () => setShowHelp(false);
 const DEFAULT_TIME_RANGE = "24h";
 
 const TIME_RANGE_OPTIONS = [
-  ["60s", "Last Minute"],
-  ["1h", "Last 1 Hour"],
-  ["3h", "Last 3 Hours"],
-  ["6h", "Last 6 Hours"],
-  ["12h", "Last 12 Hours"],
-  ["24h", "Last 24 Hours"],
-  ["3d", "Last 3 Days"],
-  ["7d", "Last Week"],
-  ["", "All"],
+  ["60s", "Последняя минута"],
+  ["1h", "Последний час"],
+  ["3h", "Последние 3 часа"],
+  ["6h", "Последние 6 часов"],
+  ["12h", "Последние 12 часов"],
+  ["24h", "Последние 24 часа"],
+  ["3d", "Последние 3 дня"],
+  ["7d", "Последняя неделя"],
+  ["", "Всё время"],
 ];
 
 function isValidTimeRange(range: string): boolean {
@@ -91,7 +91,7 @@ export function Top(props: {
   console.log(`Top: disableRange=${props.disableRange}`);
   const navigate = useNavigate();
   const [_searchParams, setSearchParams] = useSearchParams();
-  const brand = props.brand || "EveBox";
+  const brand = props.brand || "NiceSoft.Eve";
 
   // Filter time range options based on excludeTimeRanges prop
   const timeRangeOptions = props.excludeTimeRanges
@@ -183,38 +183,38 @@ export function Top(props: {
             <Nav class="me-auto">
               <Nav.Item>
                 <A href={"/inbox"} class={"nav-link"}>
-                  Inbox
+                  Входящие
                 </A>
               </Nav.Item>
               <Nav.Item>
                 <A href={"/escalated"} class={"nav-link"}>
-                  Escalated
+                  Эскалация
                 </A>
               </Nav.Item>
               <Nav.Item>
                 <A href={"/alerts"} class={"nav-link"}>
-                  Alerts
+                  Оповещения
                 </A>
               </Nav.Item>
               <Nav.Item>
                 <A href={"/stats"} class={"nav-link"}>
-                  Stats
+                  Статистика
                 </A>
               </Nav.Item>
               <Nav.Item>
                 <A href={"/events"} class={"nav-link"}>
-                  Events
+                  События
                 </A>
               </Nav.Item>
               <NavDropdown
-                title="Dashboards"
+                title="Панели"
                 active={location.pathname.startsWith("/dashboards")}
               >
                 <A href={"/dashboards/overview"} class={"dropdown-item"}>
-                  Overview
+                  Обзор
                 </A>
                 <A href={"/dashboards/alerts"} class={"dropdown-item"}>
-                  Alerts
+                  Оповещения
                 </A>
                 <A href={"/dashboards/dhcp"} class={"dropdown-item"}>
                   DHCP
@@ -231,7 +231,7 @@ export function Top(props: {
                     class={"btn btn-danger me-2"}
                     onclick={() => window.location.reload()}
                   >
-                    Reload Required
+                    Требуется перезагрузка
                   </button>
                 </Nav.Item>
               </Show>
@@ -268,7 +268,7 @@ export function Top(props: {
                   </Dropdown>
                 </Nav.Item>
               </Show>
-              <Nav.Link onClick={openHelp}>Help</Nav.Link>
+              <Nav.Link onClick={openHelp}>Помощь</Nav.Link>
               <NavDropdown
                 title={<BiGear />}
                 align={"end"}
@@ -278,14 +278,14 @@ export function Top(props: {
                 }}
               >
                 <A href="/settings" class="dropdown-item">
-                  Settings
+                  Настройки
                 </A>
                 <A href="/admin" class="dropdown-item">
-                  Admin
+                  Администрирование
                 </A>
                 <Show when={IS_AUTHENTICATED()}>
                   <a class="dropdown-item" onClick={logout}>
-                    Logout
+                    Выход
                   </a>
                 </Show>
               </NavDropdown>

@@ -27,7 +27,7 @@ export function Settings() {
   });
 
   const query_timeout_tooltip =
-    "<b>Experimental:</b> Timeout queries after a number of seconds. 0 to disable timeout. If set, recommended to be at least 3 seconds. Not applied to all queries yet. <br/>Default: 5 (disabled)";
+    "<b>Экспериментально:</b> ограничивает запросы по времени в секундах. 0 — отключить таймаут. Рекомендуется значение не менее 3 секунд. Применяется не ко всем запросам. <br/>Значение по умолчанию: 5 (выключено)";
 
   return (
     <>
@@ -37,8 +37,8 @@ export function Settings() {
           <div class="col"></div>
           <div class="col-sm-12 col-md-8 col-lg-6">
             <Alert variant={"info"}>
-              Note: Settings are stored client side and will not be reflected on
-              other computers or in other browsers.
+              Внимание: настройки сохраняются на стороне клиента и не
+              распространяются на другие компьютеры или браузеры.
             </Alert>
           </div>
           <div class="col"></div>
@@ -48,7 +48,7 @@ export function Settings() {
           <div class="col"></div>
           <div class="col-sm-12 col-md-8 col-lg-6">
             <div class={"row form-group"}>
-              <label class="col-md-4 col-form-label">Theme</label>
+              <label class="col-md-4 col-form-label">Тема</label>
               <div class="col-md-8">
                 <select
                   class="form-select"
@@ -58,10 +58,10 @@ export function Settings() {
                     value="light"
                     selected={currentThemeName() === "light"}
                   >
-                    Light
+                    Светлая
                   </option>
                   <option value="dark" selected={currentThemeName() === "dark"}>
-                    Dark
+                    Тёмная
                   </option>
                 </select>
               </div>
@@ -74,7 +74,7 @@ export function Settings() {
           <div class="col"></div>
           <div class="col-sm-12 col-md-8 col-lg-6">
             <div class={"row form-group"}>
-              <label class="col-md-4 col-form-label">View Size</label>
+              <label class="col-md-4 col-form-label">Размер списка</label>
               <div class="col-md-8">
                 <select
                   class="form-select"
@@ -96,7 +96,7 @@ export function Settings() {
                     500
                   </option>
                   <option value="fit" selected={getViewSize() === "fit"}>
-                    Fit to Height
+                    По высоте экрана
                   </option>
                 </select>
               </div>
@@ -109,7 +109,7 @@ export function Settings() {
           <div class="col"></div>
           <div class="col-sm-12 col-md-8 col-lg-6">
             <div class={"row form-group"}>
-              <label class="col-md-4 col-form-label">Timestamp Format</label>
+              <label class="col-md-4 col-form-label">Формат времени</label>
               <div class="col-md-8">
                 <select
                   class="form-select"
@@ -132,7 +132,7 @@ export function Settings() {
                       getClientPreferences().timestamp_format === "local"
                     }
                   >
-                    Local
+                    Местное
                   </option>
                   <option
                     value="utc"
@@ -152,13 +152,13 @@ export function Settings() {
           <div class="col-sm-12 col-md-8 col-lg-6">
             <div class={"row form-group"}>
               <label class="col-md-4 col-form-label">
-                Query Timeout
+                Таймаут запроса
                 <span
                   class="float-end"
                   data-bs-container="body"
                   data-bs-toggle="popover"
                   data-bs-placement="right"
-                  data-bs-title="Query Timeout"
+                  data-bs-title="Таймаут запроса"
                   data-bs-content={query_timeout_tooltip}
                 >
                   <BiQuestionCircle />

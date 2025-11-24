@@ -29,17 +29,17 @@ import { AddressCell, FilterStrip, TimestampCell } from "./components";
 
 // The list of event types that will be shown in dropdowns.
 export const EVENT_TYPES: { name: string; eventType: string }[] = [
-  { name: "All", eventType: "" },
-  { name: "Alert", eventType: "alert" },
+  { name: "Все", eventType: "" },
+  { name: "Тревоги", eventType: "alert" },
   { name: "ARP", eventType: "arp" },
-  { name: "Anomaly", eventType: "anomaly" },
+  { name: "Аномалия", eventType: "anomaly" },
   { name: "DCERPC", eventType: "dcerpc" },
   { name: "DHCP", eventType: "dhcp" },
   { name: "DNP3", eventType: "dnp3" },
   { name: "DNS", eventType: "dns" },
-  { name: "Drop", eventType: "drop" },
+  { name: "Блокировка", eventType: "drop" },
   { name: "FileInfo", eventType: "fileinfo" },
-  { name: "Flow", eventType: "flow" },
+  { name: "Поток", eventType: "flow" },
   { name: "Frame", eventType: "frame" },
   { name: "FTP", eventType: "ftp" },
   { name: "FTP Data", eventType: "ftp_data" },
@@ -321,7 +321,7 @@ export function Events() {
                 style="width: 7em;"
                 onclick={loadEvents}
               >
-                Refresh
+                Обновить
               </button>
             </Show>
             <Show when={isLoading()}>
@@ -330,7 +330,7 @@ export function Events() {
                 style={"width: 7em;"}
                 disabled
               >
-                Loading
+                Загрузка
               </button>
             </Show>
           </div>
@@ -338,7 +338,7 @@ export function Events() {
           <div class="col-auto mt-2">
             <div class={"row align-items-center"}>
               <label for={"event-type-selector"} class={"col-auto"}>
-                Event Type:
+                Тип события:
               </label>
               <div class={"col-auto"}>
                 <select
@@ -385,7 +385,7 @@ export function Events() {
                 type="text"
                 class="form-control"
                 name="searchInput"
-                placeholder="Search..."
+                placeholder="Поиск..."
                 value={searchParams.q || ""}
                 onkeydown={(e) => {
                   if (
@@ -399,7 +399,7 @@ export function Events() {
                 }}
               />
               <button class="btn btn-secondary" type="submit">
-                Apply
+                Применить
               </button>
               <button
                 class="btn btn-secondary"
@@ -408,7 +408,7 @@ export function Events() {
                   setSearchParams({ q: undefined });
                 }}
               >
-                Clear
+                Очистить
               </button>
             </Form>
           </Col>
@@ -428,7 +428,7 @@ export function Events() {
                 onclick={gotoNewest}
                 disabled={isLoading()}
               >
-                Newest
+                Самые новые
               </button>
               <button
                 type="button"
@@ -436,7 +436,7 @@ export function Events() {
                 onclick={gotoNewer}
                 disabled={isLoading()}
               >
-                Newer
+                Новее
               </button>
               <button
                 type="button"
@@ -444,7 +444,7 @@ export function Events() {
                 onclick={gotoOlder}
                 disabled={isLoading()}
               >
-                Older
+                Старше
               </button>
               <button
                 type="button"
@@ -452,7 +452,7 @@ export function Events() {
                 onclick={gotoOldest}
                 disabled={isLoading()}
               >
-                Oldest
+                Самые старые
               </button>
             </div>
           </div>
@@ -467,10 +467,10 @@ export function Events() {
                     <thead>
                       <tr>
                         <th class={"app-w-1"}></th>
-                        <th class={"col-timestamp"}>Timestamp</th>
-                        <th class={"col-event-type"}>Type</th>
-                        <th class={"col-address"}>Src/Dst</th>
-                        <th>Description</th>
+                        <th class={"col-timestamp"}>Метка времени</th>
+                        <th class={"col-event-type"}>Тип</th>
+                        <th class={"col-address"}>Источник/Назначение</th>
+                        <th>Описание</th>
                       </tr>
                     </thead>
                     <tbody>

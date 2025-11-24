@@ -784,7 +784,7 @@ export function Alerts() {
                 style="width: 7em;"
                 onclick={refresh}
               >
-                Refresh
+                Обновить
               </button>
             </Show>
             <Show when={isLoading()}>
@@ -793,7 +793,7 @@ export function Alerts() {
                 style={"width: 7em;"}
                 disabled
               >
-                Loading
+                Загрузка
               </button>
             </Show>
             <Show when={visibleEvents().length > 0 && !isAllSelected()}>
@@ -802,7 +802,7 @@ export function Alerts() {
                 style="width: 7em;"
                 onclick={selectAll}
               >
-                Select All
+                Выбрать все
               </button>
             </Show>
             <Show when={isAllSelected()}>
@@ -811,7 +811,7 @@ export function Alerts() {
                 style="width: 8em;"
                 onclick={unselectAll}
               >
-                Unselect All
+                Снять выделение
               </button>
             </Show>
             <Show when={getSelectedIndexes().length > 0}>
@@ -819,7 +819,7 @@ export function Alerts() {
                 class={"btn btn-secondary me-2"}
                 onclick={archiveSelected}
               >
-                Archive
+                Архивировать
               </button>
             </Show>
             <Show when={getSelectedIndexes().length > 0}>
@@ -827,7 +827,7 @@ export function Alerts() {
                 class={"btn btn-secondary me-2"}
                 onclick={escalateSelected}
               >
-                Escalate
+                Эскалировать
               </button>
             </Show>
             <div class="d-inline-flex">
@@ -853,7 +853,7 @@ export function Alerts() {
                 type="text"
                 class="form-control"
                 name="filter"
-                placeholder="Search..."
+                placeholder="Поиск..."
                 value={searchParams.q || ""}
                 onkeydown={(e) => {
                   if (
@@ -867,14 +867,14 @@ export function Alerts() {
                 }}
               />
               <button class="btn btn-secondary" type="submit">
-                Apply
+                Применить
               </button>
               <button
                 class="btn btn-secondary"
                 type="button"
                 onclick={clearFilter}
               >
-                Clear
+                Очистить
               </button>
             </Form>
           </Col>
@@ -929,7 +929,7 @@ export function Alerts() {
                       onclick={updateSort}
                     />
                     <SortHeader
-                      title={"Timestamp"}
+                      title={"Метка времени"}
                       key={"timestamp"}
                       sortBy={getSortBy()}
                       sortOrder={getSortOrder()}
@@ -938,21 +938,21 @@ export function Alerts() {
                     />
                     <th class="col-address" style={"cursor: pointer"}>
                       <span onclick={() => updateSort("source")}>
-                        Src{" "}
+                        Источник{" "}
                         <Show when={getSortBy() === "source"}>
                           <SortCaret order={getSortOrder()}></SortCaret>
                         </Show>
                       </span>
                       /{" "}
                       <span onclick={() => updateSort("dest")}>
-                        Dst
+                        Назначение
                         <Show when={getSortBy() === "dest"}>
                           <SortCaret order={getSortOrder()}></SortCaret>
                         </Show>
                       </span>
                     </th>
                     <SortHeader
-                      title={"Signature"}
+                      title={"Сигнатура"}
                       key={"signature"}
                       sortBy={getSortBy()}
                       sortOrder={getSortOrder()}
@@ -1051,7 +1051,7 @@ export function Alerts() {
                                   e.stopPropagation();
                                   addFilter("@sid", "+", alert.signature_id);
                                 }}
-                                title="Filter for this SID"
+                                title="Фильтр по этому SID"
                               >
                                 <BiPlusCircle />
                               </span>
@@ -1061,7 +1061,7 @@ export function Alerts() {
                                   e.stopPropagation();
                                   addFilter("@sid", "-", alert.signature_id);
                                 }}
-                                title="Filter out this SID"
+                                title="Исключить этот SID"
                               >
                                 <BiDashCircle />
                               </span>
@@ -1083,7 +1083,7 @@ export function Alerts() {
                                       archiveByRelIndex(i());
                                     }}
                                   >
-                                    Archive
+                                    Архивировать
                                   </button>
                                 </Show>
 
@@ -1119,7 +1119,7 @@ export function Alerts() {
                                         escalateArchive(i());
                                       }}
                                     >
-                                      Escalate and Archive
+                                      Эскалировать и архивировать
                                     </a>
                                   </li>
 
@@ -1133,7 +1133,7 @@ export function Alerts() {
                                         selectBySignatureId(alert.signature_id);
                                       }}
                                     >
-                                      Select all with SID {alert.signature_id}
+                                      Выбрать все с SID {alert.signature_id}
                                     </a>
                                   </li>
 
@@ -1149,7 +1149,7 @@ export function Alerts() {
                                         );
                                       }}
                                     >
-                                      Filter for SID {alert.signature_id}
+                                      Фильтр по SID {alert.signature_id}
                                     </a>
                                   </li>
                                   <li>
@@ -1164,7 +1164,7 @@ export function Alerts() {
                                         );
                                       }}
                                     >
-                                      Filter out SID {alert.signature_id}
+                                      Исключить SID {alert.signature_id}
                                     </a>
                                   </li>
                                   <li>
@@ -1181,7 +1181,7 @@ export function Alerts() {
                                         );
                                       }}
                                     >
-                                      Filter for from {event._source.timestamp}
+                                      Фильтр от {event._source.timestamp}
                                     </a>
                                   </li>
                                   <li>
@@ -1198,7 +1198,7 @@ export function Alerts() {
                                         );
                                       }}
                                     >
-                                      Filter for to {event._source.timestamp}
+                                      Фильтр до {event._source.timestamp}
                                     </a>
                                   </li>
                                   <Show when={event._source.host}>
@@ -1216,7 +1216,7 @@ export function Alerts() {
                                           );
                                         }}
                                       >
-                                        Filter for sensor {event._source.host}
+                                        Фильтр по сенсору {event._source.host}
                                       </a>
                                     </li>
                                     <li>
@@ -1233,7 +1233,7 @@ export function Alerts() {
                                           );
                                         }}
                                       >
-                                        Filter out host {event._source.host}
+                                        Исключить сенсор {event._source.host}
                                       </a>
                                     </li>
 
@@ -1335,7 +1335,7 @@ export function AlertDescription(props: { event: EventWrapper }) {
             source.tags.indexOf("evebox.auto_archived") > -1)
         }
       >
-        <span class="badge text-bg-secondary me-2">auto-archived</span>
+        <span class="badge text-bg-secondary me-2">автоархив</span>
       </Show>
     </>
   );
@@ -1373,7 +1373,7 @@ function PagerRow(props: {
 
   const NoEvents = () => (
     <div class={"row mt-2"}>
-      <div class={"col"}>No events found.</div>
+      <div class={"col"}>События не найдены.</div>
     </div>
   );
 
@@ -1391,16 +1391,16 @@ function PagerRow(props: {
       <Show when={props.events.length > 0} fallback={<NoEvents />}>
         <Row>
           <div class={"col-md-6 col-sm-12 mt-2"}>
-            Alerts {first()}-{last()} of {props.events.length}
+            Оповещения {first()}-{last()} из {props.events.length}
             <Show when={props.timedOut}>
               {" "}
               <span
                 class="badge text-bg-warning align-middle"
                 data-bs-toggle="tooltip"
-                data-bs-title="Query timed out, not all events will be shown. Maybe select smaller time frame or try refreshing."
+                data-bs-title="Время запроса истекло, отображены не все события. Попробуйте уменьшить диапазон или обновить."
                 data-bs-placement="bottom"
               >
-                Timed Out
+                Тайм-аут
               </span>
             </Show>
           </div>
@@ -1412,7 +1412,7 @@ function PagerRow(props: {
                 onclick={() => props.setOffset(0)}
                 disabled={props.offset === 0}
               >
-                Newest
+                Самые новые
               </button>
               <button
                 type="button"
@@ -1420,7 +1420,7 @@ function PagerRow(props: {
                 disabled={first() === 1}
                 onclick={() => props.setOffset(props.offset - getRowCount())}
               >
-                Newer
+                Новее
               </button>
               <button
                 type="button"
@@ -1428,7 +1428,7 @@ function PagerRow(props: {
                 disabled={props.offset + getRowCount() > props.events.length}
                 onclick={gotoOlder}
               >
-                Older
+                Старше
               </button>
               <button
                 type="button"
@@ -1436,7 +1436,7 @@ function PagerRow(props: {
                 disabled={last() == props.events.length}
                 onclick={gotoOldest}
               >
-                Oldest
+                Самые старые
               </button>
             </div>
           </div>
