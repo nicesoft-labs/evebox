@@ -82,6 +82,10 @@ impl Client {
         }
     }
 
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.url
+    }
+
     pub fn get_http_client(&self) -> Result<reqwest::Client, reqwest::Error> {
         let mut builder = reqwest::Client::builder();
         if self.disable_certificate_validation {
