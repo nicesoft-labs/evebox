@@ -74,7 +74,7 @@ export const Login = () => {
           <Col xs={12} md={8} lg={6}>
             <Show when={error()}>
               <Alert dismissible variant={"danger"}>
-                Login Failed
+                Ошибка входа
               </Alert>
             </Show>
 
@@ -83,25 +83,25 @@ export const Login = () => {
                 {loginOptions() && (
                   <Form onsubmit={doLogin}>
                     <Form.Group>
-                      <Form.Label>Username:</Form.Label>
+                      <Form.Label>Имя пользователя:</Form.Label>
                       <Form.Control
                         type={"text"}
                         spellcheck={false}
                         oninput={(e) =>
                           setLoginForm("username", e.currentTarget.value)
                         }
-                        placeholder={"Username..."}
+                        placeholder={"Имя пользователя..."}
                       />
                     </Form.Group>
 
                     <Form.Group class={"mt-3"}>
-                      <Form.Label>Password:</Form.Label>
+                      <Form.Label>Пароль:</Form.Label>
                       <Form.Control
                         oninput={(e) =>
                           setLoginForm("password", e.currentTarget.value)
                         }
                         type={"password"}
-                        placeholder={"Password..."}
+                        placeholder={"Пароль..."}
                       />
                     </Form.Group>
 
@@ -112,7 +112,7 @@ export const Login = () => {
                         type={"submit"}
                         disabled={!isValid()}
                       >
-                        Login
+                        Войти
                       </Button>
                     </div>
                   </Form>

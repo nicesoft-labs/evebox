@@ -32,55 +32,55 @@ interface ChartConfig {
 
 const CHARTS: ChartConfig[] = [
   {
-    title: "Decoder Bytes",
+    title: "Байты декодера",
     field: "stats.decoder.bytes",
     differential: true,
     canvasId: "decoderBytes",
   },
   {
-    title: "Decoder Packets",
+    title: "Пакеты декодера",
     field: "stats.decoder.pkts",
     differential: true,
     canvasId: "decoderPackets",
   },
   {
-    title: "Kernel Drops",
+    title: "Потери ядра",
     field: "stats.capture.kernel_drops",
     differential: true,
     canvasId: "kernelDrops",
   },
   {
-    title: "Flow Active",
+    title: "Активные потоки",
     field: "stats.flow.active",
     differential: false,
     canvasId: "flowActive",
   },
   {
-    title: "Flow Total",
+    title: "Всего потоков",
     field: "stats.flow.total",
     differential: true,
     canvasId: "flowTotal",
   },
   {
-    title: "Flow Spare",
+    title: "Свободные потоки",
     field: "stats.flow.spare",
     differential: false,
     canvasId: "flowSpare",
   },
   {
-    title: "Flow Memory",
+    title: "Память потоков",
     field: "stats.flow.memuse",
     differential: false,
     canvasId: "flowMemuse",
   },
   {
-    title: "TCP Memory",
+    title: "Память TCP",
     field: "stats.tcp.memuse",
     differential: false,
     canvasId: "tcpMemuse",
   },
   {
-    title: "TCP Reassembly Memory",
+    title: "Память сборки TCP",
     field: "stats.tcp.reassembly_memuse",
     differential: false,
     canvasId: "tcpReassemblyMemuse",
@@ -382,12 +382,10 @@ export function Stats(): JSX.Element {
                 class={"d-flex justify-content-end align-items-center gap-2"}
               >
                 <div class={"text-muted small"}>
-                  Showing data from{" "}
-                  {parse_timestamp(timeRange()!.min).format(
+                  Период с {parse_timestamp(timeRange()!.min).format(
                     "YYYY-MM-DD HH:mm:ss",
                   )}{" "}
-                  to{" "}
-                  {parse_timestamp(timeRange()!.max).format(
+                  по {parse_timestamp(timeRange()!.max).format(
                     "YYYY-MM-DD HH:mm:ss",
                   )}
                 </div>
@@ -397,7 +395,7 @@ export function Stats(): JSX.Element {
                     class={"btn btn-sm btn-outline-secondary"}
                     onClick={navigateToPrevious}
                   >
-                    &larr; Previous
+                    &larr; Предыдущий
                   </button>
                   <button
                     type={"button"}
@@ -405,7 +403,7 @@ export function Stats(): JSX.Element {
                     onClick={navigateToNext}
                     disabled={!canNavigateNext()}
                   >
-                    Next &rarr;
+                    Следующий &rarr;
                   </button>
                   <button
                     type={"button"}
@@ -413,7 +411,7 @@ export function Stats(): JSX.Element {
                     onClick={navigateToNow}
                     disabled={isViewingCurrentTime()}
                   >
-                    Now
+                    К текущему времени
                   </button>
                 </div>
               </div>

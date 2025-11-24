@@ -32,6 +32,7 @@ import { Ja4Report } from "./pages/ja4";
 import { Admin } from "./pages/admin/Admin";
 import { AdminFilters } from "./pages/admin/AdminFilters";
 import { AdminElastic } from "./pages/admin/AdminElastic";
+import { Footer } from "./components/Footer";
 
 export function AppRouter() {
   return (
@@ -134,9 +135,10 @@ function AuthenticationRequired(props: any) {
       <Transition name={"fade"}>{loading() && <Loader />}</Transition>
       <Transition name={"fade"}>
         {!loading() && (
-          <div>
+          <div class="d-flex flex-column min-vh-100">
             <Notifications />
-            {props.children}
+            <div class="flex-grow-1">{props.children}</div>
+            <Footer />
           </div>
         )}
       </Transition>
