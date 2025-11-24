@@ -10,22 +10,25 @@ import { getVersion, SERVER_REVISION } from "./api";
 import { GIT_REV } from "./gitrev";
 
 export function HelpModal() {
-  const [tab, setTab] = createSignal("keyboard");
+  const [tab, setTab] = createSignal<string>("keyboard");
   return (
     <Modal show={showHelp()} onHide={closeHelp} size={"lg"}>
+      <Modal.Header closeButton>
+        <Modal.Title>Справка</Modal.Title>
+      </Modal.Header>
       <Modal.Body>
-        <Tabs activeKey={tab()} onSelect={setTab}>
-          <Tab eventKey="keyboard" title="Keyboard Shortcuts">
+        <Tabs activeKey={tab()} onSelect={(k) => k && setTab(k as string)} id="help-tabs">
+          <Tab eventKey="keyboard" title="Горячие клавиши">
             <Keyboard />
           </Tab>
-          <Tab eventKey="about" title="About">
+          <Tab eventKey="about" title="О программе">
             <About />
           </Tab>
         </Tabs>
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={closeHelp}>
-          Close
+        <Button variant="secondary" onClick={closeHelp} aria-label="Закрыть окно справки">
+          Закрыть
         </Button>
       </Modal.Footer>
     </Modal>
@@ -33,66 +36,57 @@ export function HelpModal() {
 }
 
 function Keyboard() {
-  let key = (k: string) => {
-    return <span class="font-monospace">{k}</span>;
-  };
+  const key = (k: string) => <span class="font-monospace px-1 py-0.5 border rounded bg-light">{k}</span>;
 
-  let then = (a: string, b: string) => {
-    return (
-      <>
-        {key(a)} <span class="fw-lighter">then</span> {key(b)}
-      </>
-    );
-  };
+  const then = (a: string, b: string) => (
+    <>
+      {key(a)} <span class="fw-lighter">затем</span> {key(b)}
+    </>
+  );
 
-  let plus = (a: string, b: string) => {
-    return (
-      <>
-        {key(a)} <span class="fw-lighter">+</span> {key(b)}
-      </>
-    );
-  };
+  const plus = (a: string, b: string) => (
+    <>
+      {key(a)} <span class="fw-lighter">+</span> {key(b)}
+    </>
+  );
 
-  const shortcuts = [
-    [key("?"), "Show help"],
-    [then("g", "i"), "Goto inbox"],
-    [then("g", "s"), "Goto escalated"],
-    [then("g", "a"), "Goto alerts"],
-    [key("e"), "Archive selected events, or event at cursor if none selected"],
-    [key("F8"), "Archive event at cursor"],
-    [plus("Shift", "s"), "Escalate and archive event at cursor"],
-    [key("F9"), "Escalate and archive event at cursor"],
-    [key("x"), "Select event at cursor"],
-    [key("s"), "Escalate selected events, or event at cursor if none selected"],
-    [key("j"), "Move cursor to next event"],
-    [key("k"), "Move cursor to previous event"],
-    [key("."), "Show action menu for event at cursor"],
-    [plus("Control", "\\"), "Clear all filters and search"],
-    [plus("Shift", "h"), "Goto first row"],
-    [plus("Shift", "g"), "Goto last row"],
-    [then("*", "a"), "Select all alerts in view"],
-    [then("*", "n"), "Deselect all alerts"],
-    [then("*", "1"), "Select all alerts with current SID"],
+  const shortcuts: Array<[any, string]> = [
+    [key("?"), "Показать справку"],
+    [then("g", "i"), "Перейти во входящие"],
+    [then("g", "s"), "Перейти в эскалированные"],
+    [then("g", "a"), "Перейти к оповещениям"],
+    [key("e"), "Архивировать выбранные события или событие под курсором"],
+    [key("F8"), "Архивировать событие под курсором"],
+    [plus("Shift", "s"), "Эскалировать и архивировать событие под курсором"],
+    [key("F9"), "Эскалировать и архивировать событие под курсором"],
+    [key("x"), "Выбрать событие под курсором"],
+    [key("s"), "Эскалировать выбранные события или событие под курсором"],
+    [key("j"), "К следующему событию"],
+    [key("k"), "К предыдущему событию"],
+    [key("."), "Меню действий для события под курсором"],
+    [plus("Control", "\\"), "Сбросить все фильтры и поиск"],
+    [plus("Shift", "h"), "Первая строка"],
+    [plus("Shift", "g"), "Последняя строка"],
+    [then("*", "a"), "Выбрать все оповещения в области видимости"],
+    [then("*", "n"), "Снять выделение со всех оповещений"],
+    [then("*", "1"), "Выбрать все оповещения с текущим SID"],
   ];
 
   return (
-    <>
-      <p></p>
-      <table class={"table table-bordered table-sm p-5"}>
-        <tbody class="p-5">
+    <div class="pt-2">
+      <table class="table table-bordered table-sm align-middle">
+        <tbody>
           <For each={shortcuts}>
-            {(e, i) => (
-              <>
-                <tr>
-                  <td style={"white-space: nowrap !important;"}>{e[0]}</td>
-                  <td>{e[1]}</td>
-                </tr>
-              </>
+            {(e) => (
+              <tr>
+                <td style={{ "white-space": "nowrap" }}>{e[0]}</td>
+                <td>{e[1]}</td>
+              </tr>
             )}
           </For>
         </tbody>
       </table>
-    </>
+    </div>
   );
 }
 
@@ -100,35 +94,54 @@ function About() {
   const [version] = createResource(getVersion);
 
   return (
-    <>
-      <div style="padding: 12px">
-        <p>
-          <Suspense fallback={<>Loading version info...</>}>
-            This is EveBox version {version()?.version} (Rev:{" "}
-            {version()?.revision}).
-          </Suspense>
-        </p>
+    <div style="padding: 12px">
+      <p class="mb-2 text-muted small">О приложении</p>
+      <p>
+        <Suspense fallback={<>Загрузка сведений о версии…</>}>
+          Версия EveBox {version()?.version} (ревизия: {version()?.revision}).
+        </Suspense>
+      </p>
 
-        <Show when={SERVER_REVISION() && SERVER_REVISION() != GIT_REV}>
-          <div class={"alert alert-danger"}>
-            Warning: The server and frontend versions differ. Please reload.
-            <br />
-            Server={SERVER_REVISION()}, Frontend={GIT_REV}.
-          </div>
-        </Show>
+      <Show when={SERVER_REVISION() && SERVER_REVISION() !== GIT_REV}>
+        <div class="alert alert-danger" role="alert">
+          Внимание: версии сервера и фронтенда отличаются. Пожалуйста, обновите страницу.
+          <br />
+          Сервер = {SERVER_REVISION()}, Фронтенд = {GIT_REV}.
+        </div>
+      </Show>
 
-        <p>
-          Homepage and Documentation:{" "}
-          <a href="https://evebox.org">https://evebox.org</a>
-        </p>
+      <hr class="my-3" />
 
-        <p>
-          GitHub:{" "}
-          <a href="http://github.com/jasonish/evebox">
-            http://github.com/jasonish/evebox
+      <div class="vstack gap-2">
+        <div>
+          <strong>Разработчик:</strong>
+          <br />ООО «НАЙС СОФТ ГРУП»
+        </div>
+        <div>
+          <strong>Платформа:</strong>
+          <br />Работает на {" "}
+          <a href="https://niceos.ru" target="_blank" rel="noreferrer">
+            НАЙС.ОС
           </a>
-        </p>
+        </div>
+        <div>
+          <strong>Сведения о включении в реестр:</strong>
+          <br />Реестровая запись №30128 от 22.10.2025
+          <br />Произведена на основании поручения Министерства цифрового развития, связи и массовых коммуникаций Российской Федерации от 22.10.2025 по протоколу заседания экспертного совета от 09.10.2025 №872пр
+        </div>
+        <div>
+          <strong>Наши продукты:</strong>
+          <br />Доступны в каталоге
+          {" "}
+          <a
+            href="https://yandex.cloud/ru/marketplace?publishers=f2ed90kua4t10varbjh9&tab=software"
+            target="_blank"
+            rel="noreferrer"
+          >
+            на Яндекс.Cloud
+          </a>
+        </div>
       </div>
-    </>
+    </div>
   );
 }
