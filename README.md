@@ -105,6 +105,16 @@ evebox server -D . --datastore sqlite --input /var/log/suricata/eve.json
 
 More documentation can be found at http://evebox.readthedocs.io/en/latest/.
 
+### OpenSearch compatibility
+
+EveBox and the EveBox agent can send events directly to OpenSearch via the
+Elasticsearch-compatible APIs. When connecting, EveBox checks the cluster
+distribution and will warn that OpenSearch support is still a work in progress
+and that versions older than 2.6.0 are unlikely to work correctly. If you run
+into connection problems, start the agent with debug logging to capture the
+exact transport error from the bulk request and verify TLS or authentication
+settings against your OpenSearch endpoint.
+
 ## Building EveBox
 
 EveBox consists of a JavaScript frontend, and a backend written in Rust. To

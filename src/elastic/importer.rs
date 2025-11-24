@@ -3,6 +3,7 @@
 
 use super::client::BulkResponse;
 use crate::eve::Eve;
+use anyhow::anyhow;
 use tracing::{error, trace};
 
 #[derive(Clone, Debug)]
@@ -64,7 +65,21 @@ impl ElasticEventSink {
             self.queue.len() / 2,
         );
         let request = self.client.post("_bulk")?.body(body);
-        let response = request.send().await?;
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(err) => {
+                error!(
+                    "Failed to send Elasticsearch bulk request to {}: {}",
+                    self.client.endpoint(),
+                    err
+                );
+                return Err(anyhow!(
+                    "failed to send Elasticsearch bulk request to {}: {}",
+                    self.client.endpoint(),
+                    err
+                ));
+            }
+        };
         let body_text = response.text().await?;
         let body: BulkResponse = serde_json::from_str(&body_text)?;
         if body.has_error() {
