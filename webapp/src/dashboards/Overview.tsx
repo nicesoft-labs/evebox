@@ -10,7 +10,24 @@ import {
 } from "solid-js";
 import { API, AggRequest, fetchAgg } from "../api";
 import { SET_TIME_RANGE, TIME_RANGE, Top } from "../Top";
-import { Chart, ChartConfiguration } from "chart.js";
+import {
+  ArcElement,
+  BarController,
+  BarElement,
+  BubbleController,
+  CategoryScale,
+  Chart,
+  ChartConfiguration,
+  Legend,
+  Filler,
+  LineController,
+  LineElement,
+  LinearScale,
+  PointElement,
+  ScatterController,
+  TimeScale,
+  Tooltip,
+} from "chart.js";
 import "chartjs-adapter-date-fns";
 import { RefreshButton } from "../common/RefreshButton";
 import { useSearchParams } from "@solidjs/router";
@@ -21,6 +38,23 @@ import { createStore } from "solid-js/store";
 import { CountValueDataTable } from "../components/CountValueDataTable";
 import dayjs from "dayjs";
 import { Button, Card } from "solid-bootstrap";
+
+Chart.register(
+  BarElement,
+  BarController,
+  LineElement,
+  LineController,
+  PointElement,
+  ArcElement,
+  BubbleController,
+  ScatterController,
+  CategoryScale,
+  LinearScale,
+  TimeScale,
+  Tooltip,
+  Legend,
+  Filler,
+);
 
 interface AggResults {
   loading: boolean;
@@ -57,13 +91,14 @@ export function Overview() {
   let topTalkerSrcRef!: HTMLCanvasElement;
   let topTalkerDstRef!: HTMLCanvasElement;
   let topSignaturesRef!: HTMLCanvasElement;
-  let chartRegistry: { [key: string]: Chart } = {};
+  const chartRegistry: { [key: string]: Chart } = {};
   let signatureSparklines: Record<string, Chart> = {};
   const sparklineRefs: Record<string, HTMLCanvasElement | undefined> = {};
   const [sparklineVersion, setSparklineVersion] = createSignal(0);
   const [topSignaturesRows, setTopSignaturesRows] = createSignal<
     { key: string; count: number }[]
   >([]);
+  let rid = 0;
 
   const [searchParams, setSearchParams] = useSearchParams<{
     sensor?: string;
@@ -142,6 +177,7 @@ export function Overview() {
   }
 
   async function refresh() {
+    API.cancelAllSse?.();
     setVersion((version) => version + 1);
 
     let q = "";
@@ -494,37 +530,39 @@ export function Overview() {
     histogram = new Chart(ctx, config);
   }
 
-  function upsertChart(key: string, canvas: HTMLCanvasElement | undefined, config: ChartConfiguration) {
+  function upsertChart(
+    key: string,
+    canvas: HTMLCanvasElement | undefined,
+    config: ChartConfiguration,
+  ) {
     if (!canvas) return;
-    if (chartRegistry[key]) {
-      chartRegistry[key].destroy();
-    }
-    chartRegistry[key] = new Chart(canvas, {
-      ...config,
-      options: {
-        animation: false,
-        parsing: false,
-        ...(config.options || {}),
-      },
+    chartRegistry[key]?.destroy();
+    chartRegistry[key] = new Chart(canvas, config);
+  }
+
+  function splitQuery(q: string): string[] {
+    const out: string[] = [];
+    q.replace(/"([^"]*)"|(\S+)/g, (_match, quoted, bare) => {
+      out.push(quoted ?? bare);
+      return "";
     });
+    return out;
   }
 
   function addFilter(fragment: string) {
-    const list = (filters.query + " " + fragment).trim().split(/\s+/);
-    const uniq = Array.from(new Set(list));
-    const next = uniq.join(" ");
+    const tokens = splitQuery(searchParams.q || filters.query || "");
+    if (!tokens.includes(fragment)) {
+      tokens.push(fragment);
+    }
+    const next = tokens.join(" ");
     setFilters("query", next);
     setSearchParams({ sensor: searchParams.sensor, q: next || undefined });
     refreshAnalytics();
   }
 
   function removeFilter(fragment: string) {
-    const next = filters.query
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .filter((item) => item !== fragment)
-      .join(" ");
+    const tokens = splitQuery(filters.query);
+    const next = tokens.filter((token) => token !== fragment).join(" ");
     setFilters("query", next);
     setSearchParams({ sensor: searchParams.sensor, q: next || undefined });
     refreshAnalytics();
@@ -536,26 +574,23 @@ export function Overview() {
     addFilter(`${field}:${encodedValue}`);
   }
 
-  let rid = 0;
-
   async function refreshAnalytics() {
     const my = ++rid;
     const queryString = buildQueryString();
     setAnalyticsLoading(true);
     try {
       await Promise.all([
-        loadEventsPerMinute(queryString),
-        loadSeverityStack(queryString),
-        loadTopTalkers(queryString),
-        loadTopSignatures(queryString),
+        loadEventsPerMinute(my, queryString),
+        loadSeverityStack(my, queryString),
+        loadTopTalkers(my, queryString),
+        loadTopSignatures(my, queryString),
       ]);
-      if (my !== rid) return;
     } finally {
       if (my === rid) setAnalyticsLoading(false);
     }
   }
 
-  async function loadEventsPerMinute(queryString: string) {
+  async function loadEventsPerMinute(requestId: number, queryString: string) {
     const response = await API.histogramTime({
       time_range: TIME_RANGE(),
       interval: "1m",
@@ -563,9 +598,16 @@ export function Overview() {
       query_string: queryString || undefined,
     });
 
-    const labels = response.data.map((d) => dayjs.unix(d.time).toDate());
-    const counts = response.data.map((d) => d.count);
-    const avg = counts.length > 0 ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
+    if (requestId !== rid) return;
+
+    const points = response.data.map((d) => ({
+      x: new Date(d.time * 1000),
+      y: d.count,
+    }));
+    const avg =
+      points.length > 0
+        ? points.reduce((acc, item) => acc + item.y, 0) / points.length
+        : 0;
 
     upsertChart(
       "eventsPerMinute",
@@ -573,18 +615,17 @@ export function Overview() {
       {
         type: "bar",
         data: {
-          labels: labels,
           datasets: [
             {
               label: "Events per minute",
-              data: counts,
+              data: points,
               backgroundColor: "rgba(46, 120, 210, 0.35)",
               borderColor: "rgba(46, 120, 210, 1)",
             },
             {
               type: "line",
               label: "Average",
-              data: labels.map(() => avg),
+              data: points.map((p) => ({ x: p.x, y: avg })),
               borderColor: "rgba(255, 99, 132, 0.8)",
               borderWidth: 2,
               pointRadius: 0,
@@ -595,6 +636,7 @@ export function Overview() {
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          parsing: false,
           interaction: { mode: "index", intersect: false },
           scales: {
             x: { type: "time", stacked: false },
@@ -613,57 +655,51 @@ export function Overview() {
     );
   }
 
-  async function loadSeverityStack(queryString: string) {
-    const severities = [
-      { key: "1", label: "High", color: "rgba(220, 53, 69, 0.45)" },
-      { key: "2", label: "Medium", color: "rgba(255, 193, 7, 0.5)" },
-      { key: "3", label: "Low", color: "rgba(40, 167, 69, 0.45)" },
-    ];
+  async function loadSeverityStack(requestId: number, queryString: string) {
+    const res = await API.histogramSeverity({
+      time_range: TIME_RANGE(),
+      interval: "5m",
+      query_string: queryString || undefined,
+    });
 
-    const series = await Promise.all(
-      severities.map((severity) =>
-        API.histogramTime({
-          time_range: TIME_RANGE(),
-          interval: "5m",
-          event_type: "alert",
-          query_string: [queryString, `alert.severity:${severity.key}`]
-            .filter(Boolean)
-            .join(" ") || undefined,
-        }),
-      ),
-    );
+    if (requestId !== rid) return;
 
-    const labels = series[0]?.data.map((d) => dayjs.unix(d.time).toDate()) ?? [];
-    const datasets = series.map((dataset, index) => ({
-      label: severities[index].label,
-      data: dataset.data.map((d) => d.count),
-      backgroundColor: severities[index].color,
-      borderColor: severities[index].color.replace("0.45", "1"),
+    const buckets = res.per_5m.buckets;
+    const labels = buckets.map((b) => new Date(b.key));
+    const per = (sev: string | number) =>
+      buckets.map((b: any) => b.sev.buckets.find((x: any) => x.key == sev)?.doc_count || 0);
+
+    const datasets = [
+      { label: "High", color: "#d32f2f", data: per(1) },
+      { label: "Medium", color: "#f9a825", data: per(2) },
+      { label: "Low", color: "#388e3c", data: per(3) },
+    ].map((s) => ({
+      ...s,
       fill: true,
+      stack: "sev",
+      tension: 0.3,
+      backgroundColor: s.color + "66",
+      borderColor: s.color,
     }));
 
     upsertChart("severityStack", severityStackRef, {
       type: "line",
       data: { labels, datasets },
       options: {
+        parsing: false,
+        scales: { x: { type: "time" }, y: { stacked: true } },
         responsive: true,
         maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        stacked: true,
-        scales: { x: { type: "time", stacked: true }, y: { stacked: true } },
-        onClick: (evt) => {
-          const chart = chartRegistry["severityStack"];
-          const points = chart?.getElementsAtEventForMode(evt as any, "nearest", { intersect: true }, true);
-          if (points?.length) {
-            const dataset = chart!.data.datasets[points[0].datasetIndex];
-            addFilter(`alert.severity:${severities[points[0].datasetIndex].key}`);
-          }
+        onClick: (_evt, elements) => {
+          const i = elements?.[0]?.datasetIndex;
+          if (i == null) return;
+          addFilter(`alert.severity:${[1, 2, 3][i]}`);
         },
       },
     });
   }
 
-  async function loadTopTalkers(queryString: string) {
+  async function loadTopTalkers(requestId: number, queryString: string) {
     const baseRequest = {
       size: 10,
       time_range: TIME_RANGE(),
@@ -674,6 +710,8 @@ export function Overview() {
       fetchAgg({ ...baseRequest, field: "src_ip" }),
       fetchAgg({ ...baseRequest, field: "dest_ip" }),
     ]);
+
+    if (requestId !== rid) return;
 
     const renderBar = (
       key: string,
@@ -700,7 +738,7 @@ export function Overview() {
           maintainAspectRatio: false,
           indexAxis: "y",
           onClick: (_evt, elements) => {
-            const first = elements[0];
+            const first = elements?.[0];
             if (first?.index !== undefined) {
               const value = data[first.index].key;
               addFilter(`${field}:${value}`);
@@ -718,7 +756,7 @@ export function Overview() {
     renderBar("topTalkerDst", topTalkerDstRef, dst.rows, "Dst IP", "dest_ip");
   }
 
-  async function loadTopSignatures(queryString: string) {
+  async function loadTopSignatures(requestId: number, queryString: string) {
     const response = await fetchAgg({
       field: "alert.signature",
       size: 10,
@@ -726,6 +764,8 @@ export function Overview() {
       time_range: TIME_RANGE(),
       q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
     });
+
+    if (requestId !== rid) return;
 
     setTopSignaturesRows(response.rows);
 
@@ -880,9 +920,7 @@ export function Overview() {
                     onInput={(e) => setFilters("query", e.currentTarget.value)}
                   />
                   <div class="d-flex gap-2 mt-2 flex-wrap">
-                    {filters.query
-                      .trim()
-                      .split(/\s+/)
+                    {splitQuery(filters.query)
                       .filter(Boolean)
                       .map((item) => (
                         <span class="badge bg-secondary filter-tag d-flex align-items-center gap-2">
@@ -968,7 +1006,7 @@ export function Overview() {
                               <b>Events Per Minute</b>
                               <span class="badge bg-light text-dark ms-2">alerts</span>
                             </div>
-                            <div class="chart-container" style="height: 220px;">
+                            <div class="chart-container" style="position: relative; height: 220px;">
                               <canvas ref={(el) => (eventsPerMinuteRef = el)}></canvas>
                             </div>
                           </div>
@@ -981,7 +1019,7 @@ export function Overview() {
                               <b>Stacked Severity Over Time</b>
                               <span class="badge bg-info text-dark ms-2">click-to-filter</span>
                             </div>
-                            <div class="chart-container" style="height: 220px;">
+                            <div class="chart-container" style="position: relative; height: 220px;">
                               <canvas ref={(el) => (severityStackRef = el)}></canvas>
                             </div>
                           </div>
@@ -994,7 +1032,7 @@ export function Overview() {
                               <b>Top Talkers · Src</b>
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
-                            <div class="chart-container" style="height: 200px;">
+                            <div class="chart-container" style="position: relative; height: 200px;">
                               <canvas ref={(el) => (topTalkerSrcRef = el)}></canvas>
                             </div>
                           </div>
@@ -1007,7 +1045,7 @@ export function Overview() {
                               <b>Top Talkers · Dst</b>
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
-                            <div class="chart-container" style="height: 200px;">
+                            <div class="chart-container" style="position: relative; height: 200px;">
                               <canvas ref={(el) => (topTalkerDstRef = el)}></canvas>
                             </div>
                           </div>
@@ -1020,7 +1058,7 @@ export function Overview() {
                               <b>Top Signatures</b>
                               <span class="badge bg-warning text-dark ms-2">+ trend sparkline</span>
                             </div>
-                          <div class="chart-container" style="height: 240px;">
+                          <div class="chart-container" style="position: relative; height: 240px;">
                             <canvas ref={(el) => (topSignaturesRef = el)}></canvas>
                           </div>
                           <div class="mt-3 list-group list-group-flush">

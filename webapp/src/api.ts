@@ -362,6 +362,37 @@ export namespace API {
     );
   }
 
+  export async function histogramSeverity(request: {
+    time_range: string;
+    interval?: string;
+    query_string?: string;
+  }): Promise<{ per_5m: { buckets: any[] } }> {
+    const severities = [1, 2, 3];
+    const series = await Promise.all(
+      severities.map((sev) =>
+        histogramTime({
+          ...request,
+          event_type: "alert",
+          query_string: [request.query_string, `alert.severity:${sev}`]
+            .filter(Boolean)
+            .join(" ") || undefined,
+        }),
+      ),
+    );
+
+    const buckets = (series[0]?.data || []).map((entry, index) => ({
+      key: entry.time * 1000,
+      sev: {
+        buckets: severities.map((sev, sevIndex) => ({
+          key: sev,
+          doc_count: series[sevIndex]?.data?.[index]?.count ?? 0,
+        })),
+      },
+    }));
+
+    return { per_5m: { buckets } };
+  }
+
   export async function getSensors(): Promise<{ data: string[] }> {
     return get("api/sensors").then((response) => response.data);
   }
