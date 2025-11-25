@@ -8,8 +8,8 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
-import { API, AggRequest } from "../api";
-import { TIME_RANGE, Top } from "../Top";
+import { API, AggRequest, fetchAgg } from "../api";
+import { SET_TIME_RANGE, TIME_RANGE, Top } from "../Top";
 import { Chart, ChartConfiguration } from "chart.js";
 import { RefreshButton } from "../common/RefreshButton";
 import { useSearchParams } from "@solidjs/router";
@@ -19,6 +19,7 @@ import { getChartCanvasElement, loadingTracker } from "../util";
 import { createStore } from "solid-js/store";
 import { CountValueDataTable } from "../components/CountValueDataTable";
 import dayjs from "dayjs";
+import { Button, Card } from "solid-bootstrap";
 
 interface AggResults {
   loading: boolean;
@@ -44,9 +45,29 @@ export function Overview() {
     netflow: true,
   };
 
+  const [filters, setFilters] = createStore({
+    query: "",
+  });
+
+  const [analyticsLoading, setAnalyticsLoading] = createSignal(false);
+
+  let eventsPerMinuteRef: HTMLCanvasElement | undefined;
+  let severityStackRef: HTMLCanvasElement | undefined;
+  let topTalkerSrcRef: HTMLCanvasElement | undefined;
+  let topTalkerDstRef: HTMLCanvasElement | undefined;
+  let topSignaturesRef: HTMLCanvasElement | undefined;
+  let chartRegistry: { [key: string]: Chart } = {};
+
   const [searchParams, setSearchParams] = useSearchParams<{
     sensor?: string;
+    q?: string;
   }>();
+
+  createEffect(() => {
+    if (searchParams.q && searchParams.q !== filters.query) {
+      setFilters("query", searchParams.q);
+    }
+  });
 
   const [topAlerts, setTopAlerts] =
     createStore<AggResults>(defaultAggResults());
@@ -89,11 +110,27 @@ export function Overview() {
 
   onCleanup(() => {
     API.cancelAllSse();
+    Object.values(chartRegistry).forEach((chart) => chart.destroy());
   });
 
   createEffect(() => {
     refresh();
+    refreshAnalytics();
   });
+
+  function buildQueryString() {
+    let queryParts: string[] = [];
+
+    if (searchParams.sensor) {
+      queryParts.push(`host:${searchParams.sensor}`);
+    }
+
+    if (filters.query.trim().length > 0) {
+      queryParts.push(filters.query.trim());
+    }
+
+    return queryParts.join(" ").trim();
+  }
 
   async function refresh() {
     setVersion((version) => version + 1);
@@ -448,6 +485,238 @@ export function Overview() {
     histogram = new Chart(ctx, config);
   }
 
+  function upsertChart(key: string, canvas: HTMLCanvasElement | undefined, config: ChartConfiguration) {
+    if (!canvas) return;
+    if (chartRegistry[key]) {
+      chartRegistry[key].destroy();
+    }
+    chartRegistry[key] = new Chart(canvas, config);
+  }
+
+  function addFilter(fragment: string) {
+    const existing = filters.query.trim();
+    const next = existing.length > 0 ? `${existing} ${fragment}` : fragment;
+    setFilters("query", next);
+    setSearchParams({ sensor: searchParams.sensor, q: next });
+    refreshAnalytics();
+  }
+
+  async function refreshAnalytics() {
+    const queryString = buildQueryString();
+    setAnalyticsLoading(true);
+    try {
+      await Promise.all([
+        loadEventsPerMinute(queryString),
+        loadSeverityStack(queryString),
+        loadTopTalkers(queryString),
+        loadTopSignatures(queryString),
+      ]);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }
+
+  async function loadEventsPerMinute(queryString: string) {
+    const response = await API.histogramTime({
+      time_range: TIME_RANGE(),
+      interval: "1m",
+      event_type: "alert",
+      query_string: queryString || undefined,
+    });
+
+    const labels = response.data.map((d) => dayjs.unix(d.time).toDate());
+    const counts = response.data.map((d) => d.count);
+    const avg = counts.length > 0 ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
+
+    upsertChart(
+      "eventsPerMinute",
+      eventsPerMinuteRef,
+      {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Events per minute",
+              data: counts,
+              backgroundColor: "rgba(46, 120, 210, 0.35)",
+              borderColor: "rgba(46, 120, 210, 1)",
+            },
+            {
+              type: "line",
+              label: "Average",
+              data: labels.map(() => avg),
+              borderColor: "rgba(255, 99, 132, 0.8)",
+              borderWidth: 2,
+              pointRadius: 0,
+              borderDash: [6, 6],
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            x: { type: "time", stacked: false },
+            y: { beginAtZero: true },
+          },
+          plugins: {
+            legend: { display: true },
+            tooltip: {
+              callbacks: {
+                title: (items) => (items[0]?.label ? `${items[0].label}` : ""),
+              },
+            },
+          },
+        },
+      },
+    );
+  }
+
+  async function loadSeverityStack(queryString: string) {
+    const severities = [
+      { key: "1", label: "High", color: "rgba(220, 53, 69, 0.45)" },
+      { key: "2", label: "Medium", color: "rgba(255, 193, 7, 0.5)" },
+      { key: "3", label: "Low", color: "rgba(40, 167, 69, 0.45)" },
+    ];
+
+    const series = await Promise.all(
+      severities.map((severity) =>
+        API.histogramTime({
+          time_range: TIME_RANGE(),
+          interval: "5m",
+          event_type: "alert",
+          query_string: [queryString, `alert.severity:${severity.key}`]
+            .filter(Boolean)
+            .join(" ") || undefined,
+        }),
+      ),
+    );
+
+    const labels = series[0]?.data.map((d) => dayjs.unix(d.time).toDate()) ?? [];
+    const datasets = series.map((dataset, index) => ({
+      label: severities[index].label,
+      data: dataset.data.map((d) => d.count),
+      backgroundColor: severities[index].color,
+      borderColor: severities[index].color.replace("0.45", "1"),
+      fill: true,
+    }));
+
+    upsertChart("severityStack", severityStackRef, {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        stacked: true,
+        scales: { x: { type: "time", stacked: true }, y: { stacked: true } },
+        onClick: (evt) => {
+          const chart = chartRegistry["severityStack"];
+          const points = chart?.getElementsAtEventForMode(evt as any, "nearest", { intersect: true }, true);
+          if (points?.length) {
+            const dataset = chart!.data.datasets[points[0].datasetIndex];
+            addFilter(`alert.severity:${severities[points[0].datasetIndex].key}`);
+          }
+        },
+      },
+    });
+  }
+
+  async function loadTopTalkers(queryString: string) {
+    const baseRequest = {
+      size: 10,
+      time_range: TIME_RANGE(),
+      q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
+    } as AggRequest;
+
+    const [src, dst] = await Promise.all([
+      fetchAgg({ ...baseRequest, field: "src_ip" }),
+      fetchAgg({ ...baseRequest, field: "dest_ip" }),
+    ]);
+
+    const renderBar = (
+      key: string,
+      canvas: HTMLCanvasElement | undefined,
+      data: { key: string; count: number }[],
+      label: string,
+      field: string,
+    ) => {
+      upsertChart(key, canvas, {
+        type: "bar",
+        data: {
+          labels: data.map((d) => d.key),
+          datasets: [
+            {
+              label,
+              data: data.map((d) => d.count),
+              backgroundColor: "rgba(54, 162, 235, 0.5)",
+              borderColor: "rgba(54, 162, 235, 1)",
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: "y",
+          onClick: (_evt, elements) => {
+            const first = elements[0];
+            if (first?.index !== undefined) {
+              const value = data[first.index].key;
+              addFilter(`${field}:${value}`);
+            }
+          },
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true },
+          },
+        },
+      });
+    };
+
+    renderBar("topTalkerSrc", topTalkerSrcRef, src.rows, "Src IP", "src_ip");
+    renderBar("topTalkerDst", topTalkerDstRef, dst.rows, "Dst IP", "dest_ip");
+  }
+
+  async function loadTopSignatures(queryString: string) {
+    const response = await fetchAgg({
+      field: "alert.signature",
+      size: 10,
+      order: "desc",
+      time_range: TIME_RANGE(),
+      q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
+    });
+
+    upsertChart("topSignatures", topSignaturesRef, {
+      type: "bar",
+      data: {
+        labels: response.rows.map((row) => row.key),
+        datasets: [
+          {
+            label: "Количество",
+            data: response.rows.map((row) => row.count),
+            backgroundColor: response.rows.map((_, i) => Colors[i % Colors.length]),
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: "y",
+        onClick: (_evt, elements) => {
+          const first = elements[0];
+          if (first?.index !== undefined) {
+            const value = response.rows[first.index].key;
+            addFilter(`alert.signature:"${value}"`);
+          }
+        },
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true } },
+      },
+    });
+  }
+
   const formatSuffix = (timestamp: dayjs.Dayjs | null) => {
     if (timestamp) {
       return `since ${timestamp.fromNow()}`;
@@ -459,188 +728,352 @@ export function Overview() {
     <>
       <Top />
       <div class="container-fluid">
-        <div class="row">
-          <div class="mt-2 col">
-            <form class="row row-cols-lg-auto align-items-center">
-              <div class="col-12">
-                <RefreshButton loading={loading()} refresh={refresh} />
-              </div>
-              <div class="col-12">
-                <SensorSelect
-                  selected={searchParams.sensor}
-                  onchange={(sensor) => {
-                    setSearchParams({ sensor: sensor });
-                  }}
-                />
-              </div>
-            </form>
+        <div class="row g-3 align-items-stretch mt-2">
+          <div class="col-lg-3">
+            <Card class="shadow-sm h-100">
+              <Card.Body>
+                <div class="d-flex align-items-center mb-3">
+                  <b>Фильтры и пресеты</b>
+                  <div class="ms-auto">
+                    <RefreshButton loading={loading()} refresh={() => {
+                      refresh();
+                      refreshAnalytics();
+                    }} />
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <div class="text-muted mb-1">Интервал</div>
+                  <div class="d-flex flex-wrap gap-2">
+                    {["15m", "1h", "24h", "7d"].map((range) => (
+                      <Button
+                        variant={TIME_RANGE() === range ? "primary" : "outline-secondary"}
+                        size="sm"
+                        onClick={() => SET_TIME_RANGE(range)}
+                      >
+                        {range}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <div class="text-muted mb-1">Сенсор</div>
+                  <SensorSelect
+                    selected={searchParams.sensor}
+                    onchange={(sensor) => {
+                      setSearchParams({ sensor: sensor || undefined, q: filters.query || undefined });
+                      refresh();
+                      refreshAnalytics();
+                    }}
+                  />
+                </div>
+                <div class="mb-3">
+                  <div class="text-muted mb-1">Поиск и быстрые фильтры</div>
+                  <textarea
+                    class="form-control"
+                    rows={3}
+                    placeholder="ip:10.0.0.0/24 sig:2010935 proto:tcp"
+                    value={filters.query}
+                    onInput={(e) => setFilters("query", e.currentTarget.value)}
+                  />
+                  <div class="d-flex gap-2 mt-2 flex-wrap">
+                    {["event_type:alert", "alert.severity:1", "proto:tcp", "dns.type:query"].map((filter) => (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        onClick={() => addFilter(filter)}
+                      >
+                        {filter}
+                      </Button>
+                    ))}
+                  </div>
+                  <div class="d-flex gap-2 mt-3">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => {
+                        setSearchParams({
+                          sensor: searchParams.sensor,
+                          q: filters.query || undefined,
+                        });
+                        refresh();
+                        refreshAnalytics();
+                      }}
+                    >
+                      Применить
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline-danger"
+                      onClick={() => {
+                        setFilters("query", "");
+                        setSearchParams({ sensor: searchParams.sensor, q: undefined });
+                        refresh();
+                        refreshAnalytics();
+                      }}
+                    >
+                      Сбросить
+                    </Button>
+                  </div>
+                </div>
+                <div class="small text-muted">
+                  URL-синхронизация: q={searchParams.q || ""}
+                </div>
+              </Card.Body>
+            </Card>
           </div>
-        </div>
 
-        <div class="row">
-          <div class="mt-2 col col-lg-10 col-md-8 col-sm-12">
-            <div class="card">
-              <div class="card-header d-flex">
-                <b>Events by Type Over Time</b>
-                <Show when={eventsOverTimeLoading() > 0}>
-                  <button
-                    class="btn ms-auto"
-                    type="button"
-                    disabled
-                    style="border: 0; padding: 0;"
-                  >
-                    <span
-                      class="spinner-border spinner-border-sm"
-                      aria-hidden="true"
-                    ></span>
-                    <span class="visually-hidden" role="status">
-                      Loading...
-                    </span>
-                  </button>
-                </Show>
+          <div class="col-lg-9">
+            <div class="row g-3">
+              <div class="col-12">
+                <Card class="shadow-sm">
+                  <Card.Header class="d-flex align-items-center">
+                    <div>
+                      <b>Мини-дашборды (EPM, Severity, Talkers, Signatures)</b>
+                      <div class="text-muted small">Графики синхронизированы с фильтрами и мгновенно обновляются</div>
+                    </div>
+                    <Show when={analyticsLoading()}>
+                      <div class="ms-auto text-muted d-flex align-items-center gap-2">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Обновление</span>
+                      </div>
+                    </Show>
+                  </Card.Header>
+                  <Card.Body>
+                    <div class="row g-3">
+                      <div class="col-lg-6">
+                        <div class="card h-100 shadow-sm">
+                          <div class="card-body">
+                            <div class="d-flex align-items-center mb-2">
+                              <b>Events Per Minute</b>
+                              <span class="badge bg-light text-dark ms-2">alerts</span>
+                            </div>
+                            <div class="chart-container" style="height: 220px;">
+                              <canvas ref={eventsPerMinuteRef}></canvas>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-lg-6">
+                        <div class="card h-100 shadow-sm">
+                          <div class="card-body">
+                            <div class="d-flex align-items-center mb-2">
+                              <b>Stacked Severity Over Time</b>
+                              <span class="badge bg-info-subtle text-dark ms-2">click-to-filter</span>
+                            </div>
+                            <div class="chart-container" style="height: 220px;">
+                              <canvas ref={severityStackRef}></canvas>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-lg-6">
+                        <div class="card h-100 shadow-sm">
+                          <div class="card-body">
+                            <div class="d-flex align-items-center mb-2">
+                              <b>Top Talkers · Src</b>
+                              <span class="badge bg-light text-dark ms-2">cross-filter</span>
+                            </div>
+                            <div class="chart-container" style="height: 200px;">
+                              <canvas ref={topTalkerSrcRef}></canvas>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-lg-6">
+                        <div class="card h-100 shadow-sm">
+                          <div class="card-body">
+                            <div class="d-flex align-items-center mb-2">
+                              <b>Top Talkers · Dst</b>
+                              <span class="badge bg-light text-dark ms-2">cross-filter</span>
+                            </div>
+                            <div class="chart-container" style="height: 200px;">
+                              <canvas ref={topTalkerDstRef}></canvas>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <div class="card h-100 shadow-sm">
+                          <div class="card-body">
+                            <div class="d-flex align-items-center mb-2">
+                              <b>Top Signatures</b>
+                              <span class="badge bg-warning-subtle text-dark ms-2">+ trend sparkline</span>
+                            </div>
+                            <div class="chart-container" style="height: 240px;">
+                              <canvas ref={topSignaturesRef}></canvas>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card.Body>
+                </Card>
               </div>
-              <div class="card-body p-0">
-                <div class="chart-container" style="position; relative;">
-                  <canvas
-                    id="histogram"
-                    style="max-height: 180px; height: 180px;"
-                  ></canvas>
+
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-header d-flex">
+                    <b>Events by Type Over Time</b>
+                    <Show when={eventsOverTimeLoading() > 0}>
+                      <button
+                        class="btn ms-auto"
+                        type="button"
+                        disabled
+                        style="border: 0; padding: 0;"
+                      >
+                        <span
+                          class="spinner-border spinner-border-sm"
+                          aria-hidden="true"
+                        ></span>
+                        <span class="visually-hidden" role="status">
+                          Loading...
+                        </span>
+                      </button>
+                    </Show>
+                  </div>
+                  <div class="card-body p-0">
+                    <div class="chart-container" style="position; relative;">
+                      <canvas
+                        id="histogram"
+                        style="max-height: 400px; width: 100%; height: 400px;"
+                      ></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-lg-3">
+                <div class="card h-100">
+                  <div class="card-body">
+                    <div class="d-flex">
+                      <b>Трафик по протоколам</b>
+                      <Show when={protocols.loading}>
+                        <button
+                          class="btn ms-auto"
+                          type="button"
+                          disabled
+                          style="border: 0; padding: 0;"
+                        >
+                          <span
+                            class="spinner-border spinner-border-sm"
+                            aria-hidden="true"
+                          ></span>
+                          <span class="visually-hidden" role="status">
+                            Loading...
+                          </span>
+                        </button>
+                      </Show>
+                    </div>
+                    <hr />
+                    <div>
+                      <Show
+                        when={protocols.data.length == 0}
+                        fallback={<PieChart data={protocols.data} ref={protocolsPieChartRef} />}
+                      >
+                        No data.
+                      </Show>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-9">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top Alerts"
+                      label="Signature"
+                      rows={topAlerts.rows}
+                      searchField="alert.signature"
+                      loading={topAlerts.loading}
+                      suffix={formatSuffix(topAlerts.timestamp)}
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top DNS Requests"
+                      label="DNS Query"
+                      rows={topDnsRequests.rows}
+                      searchField="dns.rrname"
+                      loading={topDnsRequests.loading}
+                      suffix={formatSuffix(topDnsRequests.timestamp)}
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top TLS SNI"
+                      label="SNI"
+                      rows={topTlsSni.rows}
+                      searchField="tls.sni"
+                      loading={topTlsSni.loading}
+                      suffix={formatSuffix(topTlsSni.timestamp)}
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top QUIC SNI"
+                      label="SNI"
+                      rows={topQuicSni.rows}
+                      searchField="quic.sni"
+                      loading={topQuicSni.loading}
+                      suffix={formatSuffix(topQuicSni.timestamp)}
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top Source IP Addresses"
+                      label="IP Address"
+                      rows={topSourceIp.rows}
+                      loading={topSourceIp.loading}
+                      searchField="src_ip"
+                      suffix={formatSuffix(topSourceIp.timestamp)}
+                      tooltip="Based on flow events"
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top Destination IP Addresses"
+                      label="IP Address"
+                      rows={topDestIp.rows}
+                      loading={topDestIp.loading}
+                      searchField="dest_ip"
+                      suffix={formatSuffix(topDestIp.timestamp)}
+                      tooltip="Based on flow events"
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top Source Ports"
+                      label="Port"
+                      rows={topSourcePort.rows}
+                      loading={topSourcePort.loading}
+                      searchField="src_port"
+                      suffix={formatSuffix(topSourcePort.timestamp)}
+                      tooltip="Based on flow events"
+                    />
+                  </div>
+                  <div class="col-md-6">
+                    <CountValueDataTable
+                      title="Top Destination Ports"
+                      label="Port"
+                      rows={topDestPort.rows}
+                      loading={topDestPort.loading}
+                      searchField="dest_port"
+                      suffix={formatSuffix(topDestPort.timestamp)}
+                      tooltip="Based on flow events"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div class="mt-2 col col-lg-2 col-md-4 col-sm-12">
-            <div class="card">
-              <div class="card-header d-flex">
-                Protocols
-                <Show
-                  when={protocols.loading !== undefined && protocols.loading}
-                >
-                  {/* Loader in a button for placement reason's. */}
-                  <button
-                    class="btn ms-auto"
-                    type="button"
-                    disabled
-                    style="border: 0; padding: 0;"
-                  >
-                    <span
-                      class="spinner-border spinner-border-sm"
-                      aria-hidden="true"
-                    ></span>
-                    <span class="visually-hidden" role="status">
-                      Loading...
-                    </span>
-                  </button>
-                </Show>
-              </div>
-              <div class="card-body p-0">
-                <PieChart data={protocols.data} ref={protocolsPieChartRef} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="row mt-2">
-          <div class="col">
-            <CountValueDataTable
-              title="Top Alerts"
-              label="Signature"
-              rows={topAlerts.rows}
-              loading={topAlerts.loading}
-              searchField="alert.signature"
-              suffix={formatSuffix(topAlerts.timestamp)}
-            />
-          </div>
-          <div class="col">
-            <CountValueDataTable
-              title="Top DNS Reqeuests"
-              label="Hostname"
-              rows={topDnsRequests.rows}
-              loading={topDnsRequests.loading}
-              searchField="dns.rrname"
-              suffix={formatSuffix(topDnsRequests.timestamp)}
-            />
-          </div>
-        </div>
-
-        <div class="row mt-2">
-          <div class="col">
-            <CountValueDataTable
-              title="Top TLS SNI"
-              label="Hostname"
-              rows={topTlsSni.rows}
-              loading={topTlsSni.loading}
-              searchField="tls.sni"
-              suffix={formatSuffix(topTlsSni.timestamp)}
-            />
-          </div>
-          <div class="col">
-            <CountValueDataTable
-              title="Top Quic SNI"
-              label="Hostname"
-              rows={topQuicSni.rows}
-              loading={topQuicSni.loading}
-              searchField="quic.sni"
-              suffix={formatSuffix(topQuicSni.timestamp)}
-            />
-          </div>
-        </div>
-
-        <div class="row mt-2">
-          <div class="col">
-            <CountValueDataTable
-              title="Top Source IP Addresses"
-              label="IP Address"
-              rows={topSourceIp.rows}
-              loading={topSourceIp.loading}
-              searchField="src_ip"
-              suffix={formatSuffix(topSourceIp.timestamp)}
-              tooltip="Based on flow events"
-            />
-          </div>
-          <div class="col">
-            <CountValueDataTable
-              title="Top Destination IP Addresses"
-              label="IP Address"
-              rows={topDestIp.rows}
-              loading={topDestIp.loading}
-              searchField="dest_ip"
-              suffix={formatSuffix(topDestIp.timestamp)}
-              tooltip="Based on flow events"
-            />
-          </div>
-        </div>
-
-        <div class="row mt-2">
-          <div class="col">
-            <CountValueDataTable
-              title="Top Source Ports"
-              label="Port"
-              rows={topSourcePort.rows}
-              loading={topSourcePort.loading}
-              searchField="src_port"
-              suffix={formatSuffix(topSourcePort.timestamp)}
-              tooltip="Based on flow events"
-            />
-          </div>
-          <div class="col">
-            <CountValueDataTable
-              title="Top Destination Ports"
-              label="Port"
-              rows={topDestPort.rows}
-              loading={topDestPort.loading}
-              searchField="dest_port"
-              suffix={formatSuffix(topDestPort.timestamp)}
-              tooltip="Based on flow events"
-            />
           </div>
         </div>
       </div>
     </>
   );
-}
 
-function PieChart(props: { data: any[]; ref?: any }) {
+  }
+
+  function PieChart(props: { data: any[]; ref?: any }) {
   const chartId = createUniqueId();
   let chart: any = null;
 
