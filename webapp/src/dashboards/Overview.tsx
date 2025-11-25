@@ -11,6 +11,7 @@ import {
 import { API, AggRequest, fetchAgg } from "../api";
 import { SET_TIME_RANGE, TIME_RANGE, Top } from "../Top";
 import { Chart, ChartConfiguration } from "chart.js";
+import "chartjs-adapter-date-fns";
 import { RefreshButton } from "../common/RefreshButton";
 import { useSearchParams } from "@solidjs/router";
 import { SensorSelect } from "../common/SensorSelect";
@@ -51,17 +52,29 @@ export function Overview() {
 
   const [analyticsLoading, setAnalyticsLoading] = createSignal(false);
 
-  let eventsPerMinuteRef: HTMLCanvasElement | undefined;
-  let severityStackRef: HTMLCanvasElement | undefined;
-  let topTalkerSrcRef: HTMLCanvasElement | undefined;
-  let topTalkerDstRef: HTMLCanvasElement | undefined;
-  let topSignaturesRef: HTMLCanvasElement | undefined;
+  let eventsPerMinuteRef!: HTMLCanvasElement;
+  let severityStackRef!: HTMLCanvasElement;
+  let topTalkerSrcRef!: HTMLCanvasElement;
+  let topTalkerDstRef!: HTMLCanvasElement;
+  let topSignaturesRef!: HTMLCanvasElement;
   let chartRegistry: { [key: string]: Chart } = {};
+  let signatureSparklines: Record<string, Chart> = {};
+  const sparklineRefs: Record<string, HTMLCanvasElement | undefined> = {};
+  const [sparklineVersion, setSparklineVersion] = createSignal(0);
+  const [topSignaturesRows, setTopSignaturesRows] = createSignal<
+    { key: string; count: number }[]
+  >([]);
 
   const [searchParams, setSearchParams] = useSearchParams<{
     sensor?: string;
     q?: string;
   }>();
+
+  createEffect(() => {
+    const _ = TIME_RANGE();
+    refresh();
+    refreshAnalytics();
+  });
 
   createEffect(() => {
     if (searchParams.q && searchParams.q !== filters.query) {
@@ -99,7 +112,7 @@ export function Overview() {
     loading: false,
     data: [],
   });
-  let protocolsPieChartRef;
+  let protocolsPieChartRef: HTMLCanvasElement | undefined;
 
   function initChart() {
     if (histogram) {
@@ -111,11 +124,7 @@ export function Overview() {
   onCleanup(() => {
     API.cancelAllSse();
     Object.values(chartRegistry).forEach((chart) => chart.destroy());
-  });
-
-  createEffect(() => {
-    refresh();
-    refreshAnalytics();
+    Object.values(signatureSparklines).forEach((chart) => chart.destroy());
   });
 
   function buildQueryString() {
@@ -490,18 +499,47 @@ export function Overview() {
     if (chartRegistry[key]) {
       chartRegistry[key].destroy();
     }
-    chartRegistry[key] = new Chart(canvas, config);
+    chartRegistry[key] = new Chart(canvas, {
+      ...config,
+      options: {
+        animation: false,
+        parsing: false,
+        ...(config.options || {}),
+      },
+    });
   }
 
   function addFilter(fragment: string) {
-    const existing = filters.query.trim();
-    const next = existing.length > 0 ? `${existing} ${fragment}` : fragment;
+    const list = (filters.query + " " + fragment).trim().split(/\s+/);
+    const uniq = Array.from(new Set(list));
+    const next = uniq.join(" ");
     setFilters("query", next);
-    setSearchParams({ sensor: searchParams.sensor, q: next });
+    setSearchParams({ sensor: searchParams.sensor, q: next || undefined });
     refreshAnalytics();
   }
 
+  function removeFilter(fragment: string) {
+    const next = filters.query
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((item) => item !== fragment)
+      .join(" ");
+    setFilters("query", next);
+    setSearchParams({ sensor: searchParams.sensor, q: next || undefined });
+    refreshAnalytics();
+  }
+
+  function handleTableRowClick(field: string | undefined, value: any) {
+    if (!field) return;
+    const encodedValue = typeof value === "string" && value.includes(" ") ? `"${value}"` : value;
+    addFilter(`${field}:${encodedValue}`);
+  }
+
+  let rid = 0;
+
   async function refreshAnalytics() {
+    const my = ++rid;
     const queryString = buildQueryString();
     setAnalyticsLoading(true);
     try {
@@ -511,8 +549,9 @@ export function Overview() {
         loadTopTalkers(queryString),
         loadTopSignatures(queryString),
       ]);
+      if (my !== rid) return;
     } finally {
-      setAnalyticsLoading(false);
+      if (my === rid) setAnalyticsLoading(false);
     }
   }
 
@@ -688,6 +727,8 @@ export function Overview() {
       q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
     });
 
+    setTopSignaturesRows(response.rows);
+
     upsertChart("topSignatures", topSignaturesRef, {
       type: "bar",
       data: {
@@ -716,6 +757,69 @@ export function Overview() {
       },
     });
   }
+
+  async function loadSignatureTrend(signature: string, queryString: string) {
+    const response = await API.histogramTime({
+      time_range: TIME_RANGE(),
+      interval: "5m",
+      event_type: "alert",
+      query_string: [queryString, `alert.signature:"${signature}"`]
+        .filter(Boolean)
+        .join(" "),
+    });
+
+    const labels = response.data.map((d) => dayjs.unix(d.time).toDate());
+    const counts = response.data.map((d) => d.count);
+    const ref = sparklineRefs[signature];
+    if (!ref) return;
+
+    if (signatureSparklines[signature]) {
+      signatureSparklines[signature].destroy();
+    }
+
+    signatureSparklines[signature] = new Chart(ref, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: counts,
+            borderColor: "rgba(46, 120, 210, 1)",
+            backgroundColor: "rgba(46, 120, 210, 0.1)",
+            pointRadius: 0,
+            tension: 0.4,
+          },
+        ],
+      },
+      options: {
+        animation: false,
+        parsing: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } },
+      },
+    });
+  }
+
+  createEffect(() => {
+    const rows = topSignaturesRows();
+    const queryString = buildQueryString();
+    sparklineVersion();
+    const keys = new Set(rows.map((row) => row.key));
+    Object.keys(signatureSparklines).forEach((key) => {
+      if (!keys.has(key)) {
+        signatureSparklines[key].destroy();
+        delete signatureSparklines[key];
+      }
+    });
+    rows.forEach((row) => {
+      const ref = sparklineRefs[row.key];
+      if (ref) {
+        loadSignatureTrend(row.key, queryString);
+      }
+    });
+  });
 
   const formatSuffix = (timestamp: dayjs.Dayjs | null) => {
     if (timestamp) {
@@ -775,6 +879,23 @@ export function Overview() {
                     value={filters.query}
                     onInput={(e) => setFilters("query", e.currentTarget.value)}
                   />
+                  <div class="d-flex gap-2 mt-2 flex-wrap">
+                    {filters.query
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .map((item) => (
+                        <span class="badge bg-secondary filter-tag d-flex align-items-center gap-2">
+                          <span>{item}</span>
+                          <button
+                            type="button"
+                            class="btn-close btn-close-white btn-sm"
+                            aria-label="Remove"
+                            onClick={() => removeFilter(item)}
+                          ></button>
+                        </span>
+                      ))}
+                  </div>
                   <div class="d-flex gap-2 mt-2 flex-wrap">
                     {["event_type:alert", "alert.severity:1", "proto:tcp", "dns.type:query"].map((filter) => (
                       <Button
@@ -848,7 +969,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">alerts</span>
                             </div>
                             <div class="chart-container" style="height: 220px;">
-                              <canvas ref={eventsPerMinuteRef}></canvas>
+                              <canvas ref={(el) => (eventsPerMinuteRef = el)}></canvas>
                             </div>
                           </div>
                         </div>
@@ -858,10 +979,10 @@ export function Overview() {
                           <div class="card-body">
                             <div class="d-flex align-items-center mb-2">
                               <b>Stacked Severity Over Time</b>
-                              <span class="badge bg-info-subtle text-dark ms-2">click-to-filter</span>
+                              <span class="badge bg-info text-dark ms-2">click-to-filter</span>
                             </div>
                             <div class="chart-container" style="height: 220px;">
-                              <canvas ref={severityStackRef}></canvas>
+                              <canvas ref={(el) => (severityStackRef = el)}></canvas>
                             </div>
                           </div>
                         </div>
@@ -874,7 +995,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
                             <div class="chart-container" style="height: 200px;">
-                              <canvas ref={topTalkerSrcRef}></canvas>
+                              <canvas ref={(el) => (topTalkerSrcRef = el)}></canvas>
                             </div>
                           </div>
                         </div>
@@ -887,7 +1008,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
                             <div class="chart-container" style="height: 200px;">
-                              <canvas ref={topTalkerDstRef}></canvas>
+                              <canvas ref={(el) => (topTalkerDstRef = el)}></canvas>
                             </div>
                           </div>
                         </div>
@@ -897,14 +1018,32 @@ export function Overview() {
                           <div class="card-body">
                             <div class="d-flex align-items-center mb-2">
                               <b>Top Signatures</b>
-                              <span class="badge bg-warning-subtle text-dark ms-2">+ trend sparkline</span>
+                              <span class="badge bg-warning text-dark ms-2">+ trend sparkline</span>
                             </div>
-                            <div class="chart-container" style="height: 240px;">
-                              <canvas ref={topSignaturesRef}></canvas>
-                            </div>
+                          <div class="chart-container" style="height: 240px;">
+                            <canvas ref={(el) => (topSignaturesRef = el)}></canvas>
+                          </div>
+                          <div class="mt-3 list-group list-group-flush">
+                            {topSignaturesRows().map((row) => (
+                              <div class="list-group-item d-flex align-items-center gap-3">
+                                <div class="flex-grow-1">
+                                  <div class="fw-semibold">{row.key}</div>
+                                  <div class="text-muted small">{row.count} events</div>
+                                </div>
+                                <div style="width: 120px; height: 40px;">
+                                  <canvas
+                                    ref={(el) => {
+                                      sparklineRefs[row.key] = el;
+                                      setSparklineVersion((v) => v + 1);
+                                    }}
+                                  ></canvas>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </div>
+                    </div>
                     </div>
                   </Card.Body>
                 </Card>
@@ -932,7 +1071,7 @@ export function Overview() {
                     </Show>
                   </div>
                   <div class="card-body p-0">
-                    <div class="chart-container" style="position; relative;">
+                    <div class="chart-container" style="position: relative;">
                       <canvas
                         id="histogram"
                         style="max-height: 400px; width: 100%; height: 400px;"
@@ -968,7 +1107,14 @@ export function Overview() {
                     <div>
                       <Show
                         when={protocols.data.length == 0}
-                        fallback={<PieChart data={protocols.data} ref={protocolsPieChartRef} />}
+                        fallback={
+                          <PieChart
+                            data={protocols.data}
+                            ref={(el: HTMLCanvasElement) => {
+                              protocolsPieChartRef = el;
+                            }}
+                          />
+                        }
                       >
                         No data.
                       </Show>
@@ -986,6 +1132,7 @@ export function Overview() {
                       searchField="alert.signature"
                       loading={topAlerts.loading}
                       suffix={formatSuffix(topAlerts.timestamp)}
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -996,6 +1143,7 @@ export function Overview() {
                       searchField="dns.rrname"
                       loading={topDnsRequests.loading}
                       suffix={formatSuffix(topDnsRequests.timestamp)}
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1006,6 +1154,7 @@ export function Overview() {
                       searchField="tls.sni"
                       loading={topTlsSni.loading}
                       suffix={formatSuffix(topTlsSni.timestamp)}
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1016,6 +1165,7 @@ export function Overview() {
                       searchField="quic.sni"
                       loading={topQuicSni.loading}
                       suffix={formatSuffix(topQuicSni.timestamp)}
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1027,6 +1177,7 @@ export function Overview() {
                       searchField="src_ip"
                       suffix={formatSuffix(topSourceIp.timestamp)}
                       tooltip="Based on flow events"
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1038,6 +1189,7 @@ export function Overview() {
                       searchField="dest_ip"
                       suffix={formatSuffix(topDestIp.timestamp)}
                       tooltip="Based on flow events"
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1049,6 +1201,7 @@ export function Overview() {
                       searchField="src_port"
                       suffix={formatSuffix(topSourcePort.timestamp)}
                       tooltip="Based on flow events"
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                   <div class="col-md-6">
@@ -1060,6 +1213,7 @@ export function Overview() {
                       searchField="dest_port"
                       suffix={formatSuffix(topDestPort.timestamp)}
                       tooltip="Based on flow events"
+                      onRowClick={handleTableRowClick}
                     />
                   </div>
                 </div>
@@ -1127,9 +1281,13 @@ export function Overview() {
   return (
     <>
       <div>
-        <div class="chart-container" style="height: 180px; position; relative;">
+        <div class="chart-container" style="height: 180px; position: relative;">
           <canvas
-            ref={props.ref}
+            ref={(el) => {
+              if (typeof props.ref === "function") {
+                props.ref(el);
+              }
+            }}
             id={chartId}
             style="max-height: 150px; height: 150px;"
           ></canvas>
