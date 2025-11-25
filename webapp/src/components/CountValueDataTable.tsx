@@ -16,6 +16,7 @@ export function CountValueDataTable(props: {
   loading?: boolean;
   rows: { count: number; key: any }[];
   tooltip?: string;
+  onRowClick?: (searchField: string | undefined, value: any) => void;
 }) {
   let tooltipRef: HTMLSpanElement | undefined;
 
@@ -105,7 +106,11 @@ export function CountValueDataTable(props: {
               <tbody>
                 <For each={props.rows}>
                   {(row) => (
-                    <tr>
+                    <tr
+                      role="button"
+                      style="cursor: pointer;"
+                      onClick={() => props.onRowClick?.(props.searchField, row.key)}
+                    >
                       <td style={"width: 6em;"}>{row.count}</td>
                       <td class="force-wrap">{searchLink(row.key)}</td>
                     </tr>
