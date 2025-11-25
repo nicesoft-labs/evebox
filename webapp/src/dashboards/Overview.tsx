@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: (C) 2023 Jason Ish <jason@codemonkey.net>
 // SPDX-License-Identifier: MIT
-
 import {
   createEffect,
   createSignal,
@@ -73,33 +72,29 @@ function defaultAggResults(): AggResults {
 export function Overview() {
   const [version, setVersion] = createSignal(0);
   const [loading, setLoading] = createSignal(0);
-  let histogram: any = undefined;
+  let histogram: Chart | undefined;
   let hiddenTypes: { [key: string]: boolean } = {
     anomaly: true,
     stats: true,
     netflow: true,
   };
-
   const [filters, setFilters] = createStore({
     query: "",
   });
-
   const [analyticsLoading, setAnalyticsLoading] = createSignal(false);
-
   let eventsPerMinuteRef!: HTMLCanvasElement;
   let severityStackRef!: HTMLCanvasElement;
   let topTalkerSrcRef!: HTMLCanvasElement;
   let topTalkerDstRef!: HTMLCanvasElement;
   let topSignaturesRef!: HTMLCanvasElement;
   const chartRegistry: { [key: string]: Chart } = {};
-  let signatureSparklines: Record<string, Chart> = {};
+  const signatureSparklines: Record<string, Chart> = {};
   const sparklineRefs: Record<string, HTMLCanvasElement | undefined> = {};
   const [sparklineVersion, setSparklineVersion] = createSignal(0);
   const [topSignaturesRows, setTopSignaturesRows] = createSignal<
     { key: string; count: number }[]
   >([]);
   let rid = 0;
-
   const [searchParams, setSearchParams] = useSearchParams<{
     sensor?: string;
     q?: string;
@@ -119,30 +114,21 @@ export function Overview() {
 
   const [topAlerts, setTopAlerts] =
     createStore<AggResults>(defaultAggResults());
-
   const [topDnsRequests, setTopDnsRequests] =
     createStore<AggResults>(defaultAggResults());
-
   const [topTlsSni, setTopTlsSni] =
     createStore<AggResults>(defaultAggResults());
-
   const [topQuicSni, setTopQuicSni] =
     createStore<AggResults>(defaultAggResults());
-
   const [topSourceIp, setTopSourceIp] =
     createStore<AggResults>(defaultAggResults());
-
   const [topDestIp, setTopDestIp] =
     createStore<AggResults>(defaultAggResults());
-
   const [topSourcePort, setTopSourcePort] =
     createStore<AggResults>(defaultAggResults());
-
   const [topDestPort, setTopDestPort] =
     createStore<AggResults>(defaultAggResults());
-
   const [eventsOverTimeLoading, setEventsOverTimeLoading] = createSignal(0);
-
   const [protocols, setProtocols] = createStore({
     loading: false,
     data: [],
@@ -160,292 +146,132 @@ export function Overview() {
     API.cancelAllSse();
     Object.values(chartRegistry).forEach((chart) => chart.destroy());
     Object.values(signatureSparklines).forEach((chart) => chart.destroy());
+    if (histogram) histogram.destroy();
   });
 
   function buildQueryString() {
     let queryParts: string[] = [];
-
     if (searchParams.sensor) {
       queryParts.push(`host:${searchParams.sensor}`);
     }
-
     if (filters.query.trim().length > 0) {
       queryParts.push(filters.query.trim());
     }
-
     return queryParts.join(" ").trim();
   }
 
   async function refresh() {
     API.cancelAllSse?.();
     setVersion((version) => version + 1);
+    const q = buildQueryString();
 
-    let q = "";
-    if (searchParams.sensor) {
-      q += `host:${searchParams.sensor}`;
+    const aggRequests = [
+      { set: setTopAlerts, field: "alert.signature", q: "event_type:alert" },
+      { set: setTopDnsRequests, field: "dns.rrname", q: "event_type:dns dns.type:query" },
+      { set: setProtocols, field: "proto", q: "event_type:flow", special: "protocols" },
+      { set: setTopTlsSni, field: "tls.sni", q: "event_type:tls" },
+      { set: setTopQuicSni, field: "quic.sni", q: "event_type:quic" },
+      { set: setTopSourceIp, field: "src_ip", q: "event_type:flow" },
+      { set: setTopDestIp, field: "dest_ip", q: "event_type:flow" },
+      { set: setTopSourcePort, field: "src_port", q: "event_type:flow" },
+      { set: setTopDestPort, field: "dest_port", q: "event_type:flow" },
+    ];
+
+    for (const req of aggRequests) {
+      loadingTracker(setLoading, async () => {
+        const request: AggRequest = {
+          field: req.field,
+          size: 10,
+          order: "desc",
+          time_range: TIME_RANGE(),
+          q: [q, req.q].filter(Boolean).join(" "),
+        };
+        if (req.set === setProtocols) {
+          setProtocols("loading", true);
+          setProtocols("data", []);
+          await API.getSseAgg(request, version, (data: any) => {
+            if (data) {
+              if (protocols.data.length === 0) {
+                setProtocols("data", data.rows);
+              } else {
+                const labels = data.rows.map((e: any) => e.key);
+                const dataset = data.rows.map((e: any) => e.count);
+                const chart = Chart.getChart(protocolsPieChartRef!);
+                if (chart) {
+                  chart.data.labels = labels;
+                  chart.data.datasets[0].data = dataset;
+                  chart.data.datasets[0].backgroundColor = dataset.map(
+                    (_, i) => Colors[i % Colors.length],
+                  );
+                  chart.data.datasets[0].borderColor = dataset.map(
+                    (_, i) => Colors[i % Colors.length],
+                  );
+                  chart.update();
+                }
+              }
+            }
+          }).finally(() => setProtocols("loading", false));
+        } else {
+          req.set("loading", true);
+          await API.getSseAgg(request, version, (data: any) => {
+            if (data === null) {
+              req.set("loading", false);
+            } else if (data) {
+              req.set("timestamp", dayjs(data.earliest_ts));
+              req.set("rows", data.rows);
+            }
+          }).finally(() => req.set("loading", false));
+        }
+      });
     }
-
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "alert.signature",
-        size: 10,
-        order: "desc",
-        time_range: TIME_RANGE(),
-        q: q + " event_type:alert",
-      };
-
-      setTopAlerts("loading", true);
-
-      API.getSseAgg(request, version, (data: any) => {
-        if (data === null) {
-          setTopAlerts("loading", false);
-        } else {
-          const timestamp = dayjs(data.earliest_ts);
-          setTopAlerts("timestamp", timestamp);
-          setTopAlerts("rows", data.rows);
-        }
-      });
-    });
-
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "dns.rrname",
-        size: 10,
-        order: "desc",
-        time_range: TIME_RANGE(),
-        q: q + " event_type:dns dns.type:query",
-      };
-
-      setTopDnsRequests("loading", true);
-
-      return API.getSseAgg(request, version, (data: any) => {
-        if (data === null) {
-          setTopDnsRequests("loading", false);
-        } else {
-          setTopDnsRequests("timestamp", dayjs(data.earliest_ts));
-          setTopDnsRequests("rows", data.rows);
-        }
-      });
-    });
-
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "proto",
-        size: 10,
-        time_range: TIME_RANGE(),
-
-        // Limit to flow types to get an accurate count, otherwise
-        // we'll get duplicate counts from different event types.
-        q: q + " event_type:flow",
-      };
-
-      setProtocols("loading", true);
-      setProtocols("data", []);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          if (protocols.data.length == 0) {
-            console.log("SSE request for flow protos: first response");
-            setProtocols("data", data.rows);
-          } else {
-            console.log("SSE request for flow protos: subsequent response");
-            let labels = data.rows.map((e: any) => e.key);
-            let dataset = data.rows.map((e: any) => e.count);
-            let chart: any = Chart.getChart(protocolsPieChartRef!);
-            chart.data.labels = labels;
-            chart.data.datasets[0].data = dataset;
-            chart.data.datasets[0].backgroundColor = dataset.map(
-              (_, i) => Colors[i % Colors.length],
-            );
-            chart.data.datasets[0].borderColor = dataset.map(
-              (_, i) => Colors[i % Colors.length],
-            );
-            chart.update();
-          }
-        } else {
-          console.log("SSE request for flow protos done.");
-        }
-      }).finally(() => {
-        setProtocols("loading", false);
-      });
-    });
-
-    // TLS SNI.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "tls.sni",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:tls",
-      };
-
-      setTopTlsSni("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopTlsSni("timestamp", dayjs(data.earliest_ts));
-          setTopTlsSni("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopTlsSni("loading", false);
-      });
-    });
-
-    // Quic SNI.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "quic.sni",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:quic",
-      };
-      setTopQuicSni("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopQuicSni("timestamp", dayjs(data.earliest_ts));
-          setTopQuicSni("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopQuicSni("loading", false);
-      });
-    });
-
-    // Top Source IP.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "src_ip",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:flow",
-      };
-      setTopSourceIp("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopSourceIp("timestamp", dayjs(data.earliest_ts));
-          setTopSourceIp("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopSourceIp("loading", false);
-      });
-    });
-
-    // Top Destination IP.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "dest_ip",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:flow",
-      };
-      setTopDestIp("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopDestIp("timestamp", dayjs(data.earliest_ts));
-          setTopDestIp("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopDestIp("loading", false);
-      });
-    });
-
-    // Top Source Port.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "src_port",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:flow",
-      };
-      setTopSourcePort("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopSourcePort("timestamp", dayjs(data.earliest_ts));
-          setTopSourcePort("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopSourcePort("loading", false);
-      });
-    });
-
-    // Top Destination Port.
-    loadingTracker(setLoading, async () => {
-      let request: AggRequest = {
-        field: "dest_port",
-        size: 10,
-        time_range: TIME_RANGE(),
-        q: q + " event_type:flow",
-      };
-      setTopDestPort("loading", true);
-
-      return await API.getSseAgg(request, version, (data: any) => {
-        if (data) {
-          setTopDestPort("timestamp", dayjs(data.earliest_ts));
-          setTopDestPort("rows", data.rows);
-        }
-      }).finally(() => {
-        setTopDestPort("loading", false);
-      });
-    });
 
     fetchEventsHistogram(q);
   }
 
   async function fetchEventsHistogram(q: string) {
     initChart();
-
-    let eventTypes = await API.getEventTypes({
+    const eventTypes = await API.getEventTypes({
       time_range: TIME_RANGE(),
     });
-
     let labels: number[] = [];
-
     for (const row of eventTypes) {
-      let request = {
+      const request = {
         time_range: TIME_RANGE(),
         event_type: row,
         query_string: q,
       };
-
       loadingTracker(setLoading, async () => {
         setEventsOverTimeLoading((v) => v + 1);
-        let response = await API.histogramTime(request);
+        const response = await API.histogramTime(request);
         if (labels.length === 0) {
           response.data.forEach((e) => {
             labels.push(e.time);
           });
-          histogram.data.labels = labels;
+          if (histogram) histogram.data.labels = labels;
         }
-
-        if (response.data.length != labels.length) {
-          console.log("ERROR: Label and data mismatch");
+        if (response.data.length !== labels.length) {
+          console.error("Label and data mismatch");
         } else {
-          let values = response.data.map((e) => e.count);
-          let hidden = hiddenTypes[row];
-          let colorIdx = histogram.data.datasets.length;
-          histogram.data.datasets.push({
+          const values = response.data.map((e) => e.count);
+          const hidden = hiddenTypes[row];
+          const colorIdx = histogram?.data.datasets.length ?? 0;
+          histogram?.data.datasets.push({
             data: values,
             label: row,
             pointRadius: 0,
-            hidden: hidden,
+            hidden,
             backgroundColor: Colors[colorIdx % Colors.length],
             borderColor: Colors[colorIdx % Colors.length],
           });
-          histogram.update();
+          histogram?.update();
         }
-      }).finally(() => {
-        setEventsOverTimeLoading((v) => v - 1);
-      });
+      }).finally(() => setEventsOverTimeLoading((v) => v - 1));
     }
   }
 
   function buildChart() {
     const ctx = getChartCanvasElement("histogram");
-
-    const config: ChartConfiguration | any = {
+    const config: ChartConfiguration = {
       type: "bar",
       data: {
         labels: [],
@@ -454,7 +280,6 @@ export function Overview() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-
         plugins: {
           title: {
             display: false,
@@ -464,27 +289,22 @@ export function Overview() {
             enabled: true,
             callbacks: {
               label: function (context: any) {
-                let label = context.dataset.label;
-                let value = context.parsed.y;
-                if (value == 0) {
-                  return null;
-                }
-                return `${label}: ${value}`;
+                const label = context.dataset.label;
+                const value = context.parsed.y;
+                return value === 0 ? null : `${label}: ${value}`;
               },
             },
-            // Sort items in descending order.
             itemSort: function (a: any, b: any) {
               return b.raw - a.raw;
             },
-            // Limit the tooltip to the top 5 items. Like default Kibana.
-            filter: function (item: any, _data: any) {
+            filter: function (item: any) {
               return item.datasetIndex < 6;
             },
           },
           legend: {
             display: true,
             position: "top",
-            onClick: (_e: any, legendItem: any, legend: any) => {
+            onClick: (_e, legendItem, legend) => {
               const eventType = legendItem.text;
               const index = legendItem.datasetIndex;
               const ci = legend.chart;
@@ -524,9 +344,6 @@ export function Overview() {
         },
       },
     };
-    if (histogram) {
-      histogram.destroy();
-    }
     histogram = new Chart(ctx, config);
   }
 
@@ -536,7 +353,7 @@ export function Overview() {
     config: ChartConfiguration,
   ) {
     if (!canvas) return;
-    chartRegistry[key]?.destroy();
+    if (chartRegistry[key]) chartRegistry[key].destroy();
     chartRegistry[key] = new Chart(canvas, config);
   }
 
@@ -597,9 +414,7 @@ export function Overview() {
       event_type: "alert",
       query_string: queryString || undefined,
     });
-
     if (requestId !== rid) return;
-
     const points = response.data.map((d) => ({
       x: new Date(d.time * 1000),
       y: d.count,
@@ -608,51 +423,46 @@ export function Overview() {
       points.length > 0
         ? points.reduce((acc, item) => acc + item.y, 0) / points.length
         : 0;
-
-    upsertChart(
-      "eventsPerMinute",
-      eventsPerMinuteRef,
-      {
-        type: "bar",
-        data: {
-          datasets: [
-            {
-              label: "Events per minute",
-              data: points,
-              backgroundColor: "rgba(46, 120, 210, 0.35)",
-              borderColor: "rgba(46, 120, 210, 1)",
-            },
-            {
-              type: "line",
-              label: "Average",
-              data: points.map((p) => ({ x: p.x, y: avg })),
-              borderColor: "rgba(255, 99, 132, 0.8)",
-              borderWidth: 2,
-              pointRadius: 0,
-              borderDash: [6, 6],
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          parsing: false,
-          interaction: { mode: "index", intersect: false },
-          scales: {
-            x: { type: "time", stacked: false },
-            y: { beginAtZero: true },
+    upsertChart("eventsPerMinute", eventsPerMinuteRef, {
+      type: "bar",
+      data: {
+        datasets: [
+          {
+            label: "Events per minute",
+            data: points,
+            backgroundColor: "rgba(46, 120, 210, 0.35)",
+            borderColor: "rgba(46, 120, 210, 1)",
           },
-          plugins: {
-            legend: { display: true },
-            tooltip: {
-              callbacks: {
-                title: (items) => (items[0]?.label ? `${items[0].label}` : ""),
-              },
+          {
+            type: "line",
+            label: "Average",
+            data: points.map((p) => ({ x: p.x, y: avg })),
+            borderColor: "rgba(255, 99, 132, 0.8)",
+            borderWidth: 2,
+            pointRadius: 0,
+            borderDash: [6, 6],
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { type: "time", stacked: false },
+          y: { beginAtZero: true },
+        },
+        plugins: {
+          legend: { display: true },
+          tooltip: {
+            callbacks: {
+              title: (items) => (items[0]?.label ? `${items[0].label}` : ""),
             },
           },
         },
       },
-    );
+    });
   }
 
   async function loadSeverityStack(requestId: number, queryString: string) {
@@ -661,14 +471,11 @@ export function Overview() {
       interval: "5m",
       query_string: queryString || undefined,
     });
-
     if (requestId !== rid) return;
-
     const buckets = res.per_5m.buckets;
     const labels = buckets.map((b) => new Date(b.key));
     const per = (sev: string | number) =>
       buckets.map((b: any) => b.sev.buckets.find((x: any) => x.key == sev)?.doc_count || 0);
-
     const datasets = [
       { label: "High", color: "#d32f2f", data: per(1) },
       { label: "Medium", color: "#f9a825", data: per(2) },
@@ -681,7 +488,6 @@ export function Overview() {
       backgroundColor: s.color + "66",
       borderColor: s.color,
     }));
-
     upsertChart("severityStack", severityStackRef, {
       type: "line",
       data: { labels, datasets },
@@ -705,14 +511,11 @@ export function Overview() {
       time_range: TIME_RANGE(),
       q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
     } as AggRequest;
-
     const [src, dst] = await Promise.all([
       fetchAgg({ ...baseRequest, field: "src_ip" }),
       fetchAgg({ ...baseRequest, field: "dest_ip" }),
     ]);
-
     if (requestId !== rid) return;
-
     const renderBar = (
       key: string,
       canvas: HTMLCanvasElement | undefined,
@@ -751,7 +554,6 @@ export function Overview() {
         },
       });
     };
-
     renderBar("topTalkerSrc", topTalkerSrcRef, src.rows, "Src IP", "src_ip");
     renderBar("topTalkerDst", topTalkerDstRef, dst.rows, "Dst IP", "dest_ip");
   }
@@ -764,11 +566,8 @@ export function Overview() {
       time_range: TIME_RANGE(),
       q: [queryString, "event_type:alert"].filter(Boolean).join(" "),
     });
-
     if (requestId !== rid) return;
-
     setTopSignaturesRows(response.rows);
-
     upsertChart("topSignatures", topSignaturesRef, {
       type: "bar",
       data: {
@@ -807,16 +606,13 @@ export function Overview() {
         .filter(Boolean)
         .join(" "),
     });
-
     const labels = response.data.map((d) => dayjs.unix(d.time).toDate());
     const counts = response.data.map((d) => d.count);
     const ref = sparklineRefs[signature];
     if (!ref) return;
-
     if (signatureSparklines[signature]) {
       signatureSparklines[signature].destroy();
     }
-
     signatureSparklines[signature] = new Chart(ref, {
       type: "line",
       data: {
@@ -853,12 +649,7 @@ export function Overview() {
         delete signatureSparklines[key];
       }
     });
-    rows.forEach((row) => {
-      const ref = sparklineRefs[row.key];
-      if (ref) {
-        loadSignatureTrend(row.key, queryString);
-      }
-    });
+    rows.forEach((row) => loadSignatureTrend(row.key, queryString));
   });
 
   const formatSuffix = (timestamp: dayjs.Dayjs | null) => {
@@ -980,7 +771,6 @@ export function Overview() {
               </Card.Body>
             </Card>
           </div>
-
           <div class="col-lg-9">
             <div class="row g-3">
               <div class="col-12">
@@ -1007,7 +797,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">alerts</span>
                             </div>
                             <div class="chart-container" style="position: relative; height: 220px;">
-                              <canvas ref={(el) => (eventsPerMinuteRef = el)}></canvas>
+                              <canvas ref={eventsPerMinuteRef}></canvas>
                             </div>
                           </div>
                         </div>
@@ -1020,7 +810,7 @@ export function Overview() {
                               <span class="badge bg-info text-dark ms-2">click-to-filter</span>
                             </div>
                             <div class="chart-container" style="position: relative; height: 220px;">
-                              <canvas ref={(el) => (severityStackRef = el)}></canvas>
+                              <canvas ref={severityStackRef}></canvas>
                             </div>
                           </div>
                         </div>
@@ -1033,7 +823,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
                             <div class="chart-container" style="position: relative; height: 200px;">
-                              <canvas ref={(el) => (topTalkerSrcRef = el)}></canvas>
+                              <canvas ref={topTalkerSrcRef}></canvas>
                             </div>
                           </div>
                         </div>
@@ -1046,7 +836,7 @@ export function Overview() {
                               <span class="badge bg-light text-dark ms-2">cross-filter</span>
                             </div>
                             <div class="chart-container" style="position: relative; height: 200px;">
-                              <canvas ref={(el) => (topTalkerDstRef = el)}></canvas>
+                              <canvas ref={topTalkerDstRef}></canvas>
                             </div>
                           </div>
                         </div>
@@ -1058,107 +848,72 @@ export function Overview() {
                               <b>Top Signatures</b>
                               <span class="badge bg-warning text-dark ms-2">+ trend sparkline</span>
                             </div>
-                          <div class="chart-container" style="position: relative; height: 240px;">
-                            <canvas ref={(el) => (topSignaturesRef = el)}></canvas>
-                          </div>
-                          <div class="mt-3 list-group list-group-flush">
-                            {topSignaturesRows().map((row) => (
-                              <div class="list-group-item d-flex align-items-center gap-3">
-                                <div class="flex-grow-1">
-                                  <div class="fw-semibold">{row.key}</div>
-                                  <div class="text-muted small">{row.count} events</div>
+                            <div class="chart-container" style="position: relative; height: 240px;">
+                              <canvas ref={topSignaturesRef}></canvas>
+                            </div>
+                            <div class="mt-3 list-group list-group-flush">
+                              {topSignaturesRows().map((row) => (
+                                <div class="list-group-item d-flex align-items-center gap-3">
+                                  <div class="flex-grow-1">
+                                    <div class="fw-semibold">{row.key}</div>
+                                    <div class="text-muted small">{row.count} events</div>
+                                  </div>
+                                  <div style="width: 120px; height: 40px;">
+                                    <canvas
+                                      ref={(el) => {
+                                        sparklineRefs[row.key] = el;
+                                        setSparklineVersion((v) => v + 1);
+                                      }}
+                                    ></canvas>
+                                  </div>
                                 </div>
-                                <div style="width: 120px; height: 40px;">
-                                  <canvas
-                                    ref={(el) => {
-                                      sparklineRefs[row.key] = el;
-                                      setSparklineVersion((v) => v + 1);
-                                    }}
-                                  ></canvas>
-                                </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div class="col-12">
+                <Card class="shadow-sm">
+                  <Card.Header class="d-flex align-items-center">
+                    <b>Events by Type Over Time</b>
+                    <Show when={eventsOverTimeLoading() > 0}>
+                      <div class="ms-auto text-muted d-flex align-items-center gap-2">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Обновление</span>
+                      </div>
+                    </Show>
+                  </Card.Header>
+                  <Card.Body>
+                    <div class="chart-container" style="position: relative; height: 400px;">
+                      <canvas id="histogram" style="height: 400px; width: 100%;"></canvas>
                     </div>
                   </Card.Body>
                 </Card>
               </div>
-
-              <div class="col-12">
-                <div class="card">
-                  <div class="card-header d-flex">
-                    <b>Events by Type Over Time</b>
-                    <Show when={eventsOverTimeLoading() > 0}>
-                      <button
-                        class="btn ms-auto"
-                        type="button"
-                        disabled
-                        style="border: 0; padding: 0;"
-                      >
-                        <span
-                          class="spinner-border spinner-border-sm"
-                          aria-hidden="true"
-                        ></span>
-                        <span class="visually-hidden" role="status">
-                          Loading...
-                        </span>
-                      </button>
-                    </Show>
-                  </div>
-                  <div class="card-body p-0">
-                    <div class="chart-container" style="position: relative;">
-                      <canvas
-                        id="histogram"
-                        style="max-height: 400px; width: 100%; height: 400px;"
-                      ></canvas>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <div class="col-lg-3">
-                <div class="card h-100">
-                  <div class="card-body">
-                    <div class="d-flex">
-                      <b>Трафик по протоколам</b>
-                      <Show when={protocols.loading}>
-                        <button
-                          class="btn ms-auto"
-                          type="button"
-                          disabled
-                          style="border: 0; padding: 0;"
-                        >
-                          <span
-                            class="spinner-border spinner-border-sm"
-                            aria-hidden="true"
-                          ></span>
-                          <span class="visually-hidden" role="status">
-                            Loading...
-                          </span>
-                        </button>
-                      </Show>
-                    </div>
-                    <hr />
-                    <div>
-                      <Show
-                        when={protocols.data.length == 0}
-                        fallback={
-                          <PieChart
-                            data={protocols.data}
-                            ref={(el: HTMLCanvasElement) => {
-                              protocolsPieChartRef = el;
-                            }}
-                          />
-                        }
-                      >
-                        No data.
-                      </Show>
-                    </div>
-                  </div>
-                </div>
+                <Card class="shadow-sm h-100">
+                  <Card.Header class="d-flex align-items-center">
+                    <b>Трафик по протоколам</b>
+                    <Show when={protocols.loading}>
+                      <div class="ms-auto text-muted d-flex align-items-center gap-2">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span>Обновление</span>
+                      </div>
+                    </Show>
+                  </Card.Header>
+                  <Card.Body>
+                    <Show
+                      when={protocols.data.length > 0}
+                      fallback={<div class="text-muted">No data available.</div>}
+                    >
+                      <PieChart data={protocols.data} ref={protocolsPieChartRef} />
+                    </Show>
+                  </Card.Body>
+                </Card>
               </div>
               <div class="col-lg-9">
                 <div class="row g-3">
@@ -1262,20 +1017,17 @@ export function Overview() {
       </div>
     </>
   );
+}
 
-  }
-
-  function PieChart(props: { data: any[]; ref?: any }) {
+function PieChart(props: { data: any[]; ref?: HTMLCanvasElement }) {
   const chartId = createUniqueId();
-  let chart: any = null;
+  let chart: Chart | null = null;
 
   createEffect(() => {
     const element = getChartCanvasElement(chartId);
-
-    if (chart != null) {
+    if (chart) {
       chart.destroy();
     }
-
     chart = new Chart(element, {
       type: "pie",
       data: {
@@ -1283,9 +1035,7 @@ export function Overview() {
         datasets: [
           {
             data: props.data.map((e) => e.count),
-            backgroundColor: props.data.map(
-              (_, i) => Colors[i % Colors.length],
-            ),
+            backgroundColor: props.data.map((_, i) => Colors[i % Colors.length]),
             borderColor: props.data.map((_, i) => Colors[i % Colors.length]),
             borderWidth: 1,
           },
@@ -1307,8 +1057,10 @@ export function Overview() {
                 datasetIndex: 0,
                 index: legendItem.index,
               };
-              chart.tooltip.setActiveElements([activeElement]);
-              chart.update();
+              if (chart) {
+                chart.tooltip.setActiveElements([activeElement]);
+                chart.update();
+              }
             },
           },
         },
@@ -1316,21 +1068,17 @@ export function Overview() {
     });
   });
 
+  onCleanup(() => {
+    if (chart) chart.destroy();
+  });
+
   return (
-    <>
-      <div>
-        <div class="chart-container" style="height: 180px; position: relative;">
-          <canvas
-            ref={(el) => {
-              if (typeof props.ref === "function") {
-                props.ref(el);
-              }
-            }}
-            id={chartId}
-            style="max-height: 150px; height: 150px;"
-          ></canvas>
-        </div>
-      </div>
-    </>
+    <div class="chart-container" style="height: 180px; position: relative;">
+      <canvas
+        id={chartId}
+        ref={props.ref}
+        style="max-height: 150px; height: 150px;"
+      ></canvas>
+    </div>
   );
 }
